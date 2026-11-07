@@ -296,7 +296,8 @@ object M3uParser {
         val m = SE.find(e.name)
         val isSeriesUrl = e.url.contains("/series/")
         val isMovie = e.url.contains("/movie/") || VIDEO_FILE.containsMatchIn(e.url) || VOD_GROUP.containsMatchIn(e.group)
-        val kind = if (m != null || isSeriesUrl) Kind.SERIES else if (isMovie) Kind.MOVIE else Kind.LIVE
+        // OnAir: an Xtream /live/ address is always a channel (e.g. "HBO" in a "MOVIE CHANNELS" group is not a film)
+        val kind = if (e.url.contains("/live/")) Kind.LIVE else if (m != null || isSeriesUrl) Kind.SERIES else if (isMovie) Kind.MOVIE else Kind.LIVE
         val lang = langOf.of(e.group, e.name, kind == Kind.LIVE)
         val countKey = if (kind == Kind.SERIES) (m?.groupValues?.get(1) ?: e.name).trim().lowercase() else null
         st.add(lang, e.info.length + e.url.length + 2, countKey)
@@ -323,6 +324,8 @@ object M3uParser {
         var suf = ByteArray(32)
         var sufLen = 0
         var done = false
+        /** OnAir: get_series_info references (player_api login), episodes are fetched when the show is opened. */
+        var refs: ArrayList<String>? = null
 
         fun add(season: Int, num: Int, p: String, url: String, label: String, q: String?, lang: String?) {
             if (n == ss.size) {
@@ -386,6 +389,13 @@ object M3uParser {
                         SeriesAcc(title, attr(e.info, "tvg-logo")?.ifBlank { null }, group, q, kd.lang)
                     }
                     if (acc.done) return@entries
+                    if (XtreamApiLogic.isSeriesRef(e.url)) {
+                        val rl = acc.refs ?: ArrayList<String>(1).also { acc.refs = it }
+                        val vl0 = LANG.find(e.name)?.groupValues?.get(1)?.uppercase()
+                        val lab0 = listOfNotNull(vl0, q, group.take(18)).joinToString(" · ")
+                        if (rl.size < XtreamApiLogic.MAX_REFS) rl.add(XtreamApiLogic.ref(e.url, lab0, q, vl0))
+                        return@entries
+                    }
                     val season = m?.groupValues?.get(2)?.toIntOrNull() ?: 1
                     val num = m?.groupValues?.get(3)?.toIntOrNull() ?: (acc.n + 1)
                     val vl = pool.ofOrNull(LANG.find(e.name)?.groupValues?.get(1)?.uppercase())
@@ -409,6 +419,7 @@ object M3uParser {
 
         for ((key, acc) in series) {
             if (acc.done) continue
+            val refs = acc.refs?.joinToString(" ")
             val raw = acc.raw()
             acc.free()   // sofort freigeben: Folgen werden Serie für Serie umgebaut
             raw.sortWith(compareBy({ it.season }, { it.num }))
@@ -427,7 +438,7 @@ object M3uParser {
                 }
                 i = j
             }
-            out.add(Item("s_$key", Kind.SERIES, acc.title, null, "", acc.logo, acc.group, EpisodeTable.of(eps, pool), acc.q, lang = acc.lang))
+            out.add(Item("s_$key", Kind.SERIES, acc.title, null, "", acc.logo, acc.group, EpisodeTable.of(eps, pool), acc.q, tvgId = refs, lang = acc.lang))
         }
         out.trimToSize()
         return ParsedPlaylist(out, epgFromHeader(header), st.counts(), st.bytes, catchup)

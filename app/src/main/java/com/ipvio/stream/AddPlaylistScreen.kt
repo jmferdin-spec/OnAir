@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -105,9 +106,10 @@ fun AddPlaylistScreen(onDone: () -> Unit) {
                     cm.primaryClip?.getItemAt(0)?.text?.let { url = it.toString() }
                 }
             } else {
-                Field(host, { host = it }, "Server (z. B. http://server.tld:8080)")
-                Field(user, { user = it }, "Benutzername")
-                Field(pass, { pass = it }, "Passwort", password = !showPass)
+                Field(host, { host = it }, "Server (z. B. http://server.tld:8080)", credential = KeyboardType.Uri)
+                Field(user, { user = it }, "Benutzername", credential = KeyboardType.Ascii)
+                // Always a password input (keyboard stays in password mode, nothing learned); "show" only changes the dots
+                Field(pass, { pass = it }, "Passwort", password = !showPass, credential = KeyboardType.Password)
                 FocusButton(if (showPass) "Passwort verbergen" else "Passwort anzeigen") { showPass = !showPass }
             }
             PlaylistStore.error?.let { Text(it, color = DS.Danger, fontSize = 18.sp) }

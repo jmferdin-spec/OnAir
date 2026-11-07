@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -174,7 +175,9 @@ fun Field(
     /** Nur Ziffern (Zahlen-Tastatur), z. B. „Gehe zu Folge“. */
     number: Boolean = false,
     /** „Fertig“ auf der Bildschirmtastatur. */
-    onDone: (() -> Unit)? = null
+    onDone: (() -> Unit)? = null,
+    /** OnAir: login data (server, user, password) – no autocorrect, no auto-capitalisation, given keyboard type. */
+    credential: KeyboardType? = null
 ) {
     var f by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(16.dp)
@@ -191,7 +194,10 @@ fun Field(
             textStyle = TextStyle(color = Color.White, fontSize = 20.sp),
             cursorBrush = SolidColor(Accent2),
             visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
-            keyboardOptions = if (number) KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
+            keyboardOptions = if (credential != null) KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false,
+                    keyboardType = credential, imeAction = if (onDone != null) ImeAction.Done else ImeAction.Next)
+                else if (number) KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
                 else if (onDone != null) KeyboardOptions(imeAction = ImeAction.Done) else KeyboardOptions.Default,
             // Nur mit eigener Aktion überschreiben; sonst bleibt das Standardverhalten (Tastatur schließen)
             keyboardActions = if (onDone != null) KeyboardActions(onDone = { onDone(); defaultKeyboardAction(ImeAction.Done) }) else KeyboardActions.Default,

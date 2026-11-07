@@ -112,11 +112,12 @@ object Xmltv {
                 past[k] = maxOf(past[k] ?: 0, d.coerceAtMost(7))
             }
             for (u in all) {
-                try { parse(u, wanted, map, past) } catch (e: Exception) { err = if (e is PlaylistError) e.message else e.javaClass.simpleName }
+                try { parse(u, wanted, map, past) } catch (e: Exception) { LoginDebug.error(u, "xmltv", e); err =if (e is PlaylistError) e.message else e.javaClass.simpleName }
             }
             progs.clear()
             for ((k, v) in map) progs[k] = v.sortedBy { it.start }
             channelCount = progs.size
+            LoginDebug.info("xmltv: ${progs.size} channels with guide data" + (if (err != null) " (error: $err)" else ""))
             status = if (progs.isEmpty()) "Keine Programmdaten erhalten (${err ?: "leer"})"
             else if (truncated) "Geladen: ${progs.size} Sender mit Programm (gekürzt, Speicher knapp)"
             else "Geladen: ${progs.size} Sender mit Programm"
@@ -133,7 +134,9 @@ object Xmltv {
         if (d.length <= MAX_DESC) d else d.substring(0, d.lastIndexOf(' ', MAX_DESC).takeIf { it > MAX_DESC / 2 } ?: MAX_DESC) + " …"
 
     private fun parse(url: String, wanted: Set<String>, out: HashMap<String, MutableList<EpgEntry>>, past: Map<String, Int> = emptyMap()) {
+        LoginDebug.request(url)
         client.newCall(Request.Builder().url(url).build()).execute().use { r ->
+            if (BuildConfig.DEBUG) LoginDebug.response(url, r.code, r.message, runCatching { r.peekBody(1024).string() }.getOrDefault("<unreadable>"))
             if (!r.isSuccessful) throw PlaylistError("HTTP ${r.code}")
             var ins: InputStream = BufferedInputStream((r.body ?: throw PlaylistError("leer")).byteStream())
             ins.mark(2)
@@ -239,7 +242,9 @@ object Epg {
         if (local.isNotEmpty() && current(local) != null) return local.take(8)
         val url = xtreamApi(item, "get_short_epg")
         if (url != null) {
+            LoginDebug.request("$url&limit=8")
             val body = EpgNet.fetch("$url&limit=8")
+            if (BuildConfig.DEBUG) LoginDebug.info("get_short_epg fallback: " + (if (body == null) "failed" else "${body.length} chars"))
             if (body != null) {
                 val out = parseListings(body)
                 if (out.isNotEmpty()) { cache[item.id] = nowMs to out; return out }

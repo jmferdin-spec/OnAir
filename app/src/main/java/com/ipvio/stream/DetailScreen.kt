@@ -78,13 +78,15 @@ private const val FULL_TEXT_CHARS = 800
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun DetailScreen(
-    item: Item, all: List<Item>, onPlay: (String, String, Long) -> Unit,
+    item0: Item, all: List<Item>, onPlay: (String, String, Long) -> Unit,
     onPerson: (PersonRef) -> Unit, onOpenItem: (Item) -> Unit, onBack: () -> Unit,
     // Kino-Ansicht: eingebettet unter der Titelreihe (kein eigener Zurück-Knopf, kein automatischer Fokus, Hoch am Kopf gibt weiter)
     embedded: Boolean = false, autoFocus: Boolean = true, onTopUp: (() -> Unit)? = null,
     // false = nur Infos (Kino-Vorschau): keine Knöpfe, keine Staffel-Leiste
     showActions: Boolean = true
 ) {
+    // OnAir: shows from a player_api login get their episodes (get_series_info) when opened
+    val item by produceState(SeriesInfo.cached(item0), item0) { value = SeriesInfo.load(item0) }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -116,7 +118,7 @@ fun DetailScreen(
     // Zurück aus dem Player: bei genau der Folge öffnen, die zuletzt lief (einmalig), sonst beim Fortsetzen-Punkt
     val retSE = remember(item.id) { DetailReturn.take(item.id)?.takeIf { it.first > 0 || it.second > 0 } }
     val startSE = retSE ?: resumeSE
-    var season by remember(item.id) { mutableIntStateOf(startSE?.first?.takeIf { it in seasons } ?: seasons.firstOrNull() ?: 1) }
+    var season by remember(item.id, seasons) { mutableIntStateOf(startSE?.first?.takeIf { it in seasons } ?: seasons.firstOrNull() ?: 1) }
     val eps = remember(item, season) { item.episodes.filter { it.season == season } }
     val progress = remember(item.id) { EpProgress.of(ctx, item.id) }
 

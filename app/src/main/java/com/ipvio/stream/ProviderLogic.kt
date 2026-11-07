@@ -23,7 +23,8 @@ object ProviderLogic {
     /** Account of a series, taken from its first episode address (or the series address itself). */
     fun seriesAcct(i: Item): Acct? {
         val u = i.episodes.firstOrNull()?.url ?: i.url
-        val g = SERIES.find(u)?.groupValues ?: return null
+        // OnAir: player_api login – episodes not loaded yet, the account comes from the get_series_info reference
+        val g = SERIES.find(u)?.groupValues ?: return XtreamApiLogic.refsOf(i.tvgId).firstOrNull()?.acct
         return Acct(g[1], g[2], g[3])
     }
 

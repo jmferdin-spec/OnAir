@@ -389,6 +389,7 @@ object PlaylistStore {
             try {
                 return download(c, u)
             } catch (e: IOException) {
+                LoginDebug.error(u, "download attempt ${attempt + 1}/3", e)
                 if (cancelled()) throw CancellationException("abgebrochen")
                 if (!PlaylistLogic.retryable(e)) throw e
                 last = e
@@ -405,6 +406,107 @@ object PlaylistStore {
      * Liegt noch eine fertig geladene, aber nicht eingelesene Datei vor (Absturz/Stromausfall beim Einlesen), wird sie verwendet.
      */
     private fun download(c: Context, u: String): Pair<File, Charset> {
+        val acct = XtreamApiLogic.acctOf(u) ?: return downloadM3u(c, u)
+        // OnAir: Xtream login loads through player_api.php; get.php only if that fails
+        try {
+            return downloadApi(c, u, acct)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (cancelled()) throw CancellationException("abgebrochen")
+            LoginDebug.error(u, "player_api", e)
+            LoginDebug.info("player_api failed, falling back to get.php")
+            try {
+                return downloadM3u(c, u)
+            } catch (e2: CancellationException) {
+                throw e2
+            } catch (e2: Exception) {
+                LoginDebug.error(u, "get.php fallback", e2)
+                throw e   // the player_api reason is the more useful message (e.g. wrong password)
+            }
+        }
+    }
+
+    /** Small player_api answer as text (account check, categories); logged (masked). */
+    private fun apiText(u: String): Pair<Int, String> {
+        LoginDebug.request(u)
+        val cl = client.newCall(Request.Builder().url(u).header("User-Agent", UA).build())
+        call = cl
+        try {
+            cl.execute().use { r ->
+                val body = r.body?.string().orEmpty()
+                LoginDebug.response(u, r.code, r.message, body)
+                return r.code to body
+            }
+        } finally {
+            call = null
+        }
+    }
+
+    /**
+     * OnAir: the whole account through player_api.php (live, films, series with their categories), written as M3U lines
+     * into the same download file the get.php path uses – parser, cache, language filter and EPG stay unchanged.
+     * The big stream lists are read piece by piece, never as one string.
+     */
+    private fun downloadApi(c: Context, u: String, a: ProviderLogic.Acct): Pair<File, Charset> {
+        val raw = rawFile(c, u)
+        val info = infoFile(c, u)
+        val part = partFile(c, u)
+        val pi = LoadLogic.PartInfo.decode(runCatching { info.readText() }.getOrNull())?.takeIf { it.urlHash == key(u) }
+        if (pi != null && raw.exists() && raw.length() > 0 && System.currentTimeMillis() - raw.lastModified() < RAW_MAX_AGE) {
+            return raw to charsetOf(pi.charset)
+        }
+        raw.delete(); part.delete()
+        phase = "Verbindung zum Server wird aufgebaut …"
+        bytesRead = 0L; totalBytes = -1L; downloadDone = false
+        val (code, body) = apiText(XtreamApiLogic.apiUrl(a))
+        if (code !in 200..299) throw PlaylistError(PlaylistLogic.httpError(code))
+        val acc = XtreamApiLogic.account(body)
+        if (!acc.ok) throw PlaylistError(PlaylistLogic.httpError(401))
+        val liveExt = XtreamApiLogic.liveExt(acc.formats)
+        info.writeText(LoadLogic.PartInfo(key(u), null, null, "UTF-8").encode())
+        phase = "Playlist wird heruntergeladen …"
+        val counts = IntArray(3)
+        part.outputStream().bufferedWriter(Charsets.UTF_8).use { w ->
+            w.write("#EXTM3U\n")
+            val sections = listOf(
+                Triple("get_live_categories", "get_live_streams") { f: Map<String, String>, cats: Map<String, String> -> XtreamApiLogic.liveEntry(f, cats, a, liveExt) },
+                Triple("get_vod_categories", "get_vod_streams") { f: Map<String, String>, cats: Map<String, String> -> XtreamApiLogic.movieEntry(f, cats, a) },
+                Triple("get_series_categories", "get_series") { f: Map<String, String>, cats: Map<String, String> -> XtreamApiLogic.seriesEntry(f, cats, a) }
+            )
+            for ((idx, s) in sections.withIndex()) {
+                val (catAction, listAction, entry) = s
+                if (cancelled()) throw CancellationException("abgebrochen")
+                val (cc, cb) = apiText(XtreamApiLogic.apiUrl(a, catAction))
+                val cats = if (cc in 200..299) XtreamApiLogic.categories(cb) else emptyMap()
+                val lu = XtreamApiLogic.apiUrl(a, listAction)
+                LoginDebug.request(lu)
+                val cl = client.newCall(Request.Builder().url(lu).header("User-Agent", UA).build())
+                call = cl
+                try {
+                    cl.execute().use { r ->
+                        LoginDebug.response(lu, r.code, r.message, runCatching { r.peekBody(2048).string() }.getOrDefault("<unreadable>"))
+                        if (!r.isSuccessful) throw PlaylistError(PlaylistLogic.httpError(r.code))
+                        val rb = r.body ?: throw PlaylistError("Der Server hat keine Daten geliefert.")
+                        val base = bytesRead
+                        val ins = CountingStream(rb.byteStream()) { bytesRead = base + it }
+                        counts[idx] = XtreamApi.forEachObject(ins.reader(Charsets.UTF_8), { if (cancelled()) throw CancellationException("abgebrochen") }) { f ->
+                            entry(f, cats)?.let { w.write(it) }
+                        }
+                    }
+                } finally {
+                    call = null
+                }
+            }
+        }
+        LoginDebug.info("player_api: live=${counts[0]} movies=${counts[1]} series=${counts[2]}")
+        if (counts.sum() == 0) throw PlaylistError("Keine Sender in der Playlist gefunden.")
+        raw.delete()
+        if (!part.renameTo(raw)) throw IOException("Datei konnte nicht umbenannt werden")
+        return raw to Charsets.UTF_8
+    }
+
+    private fun downloadM3u(c: Context, u: String): Pair<File, Charset> {
         val raw = rawFile(c, u)
         val info = infoFile(c, u)
         val part = partFile(c, u)
@@ -425,7 +527,9 @@ object PlaylistStore {
         val cl = client.newCall(rb.build())
         call = cl
         try {
+            LoginDebug.request(u)
             cl.execute().use { r ->
+                if (BuildConfig.DEBUG) LoginDebug.response(u, r.code, r.message, runCatching { r.peekBody(2048).string() }.getOrDefault("<unreadable>"))
                 var append = false
                 when (LoadLogic.resumeAction(r.code, r.header("Content-Range"), offset)) {
                     LoadLogic.APPEND -> append = true
@@ -709,6 +813,7 @@ object PlaylistStore {
                 if (save) failPending(c, MSG_CANCEL)
                 throw e
             } catch (e: Exception) {
+                LoginDebug.error(u, "load", e)
                 if (cancelled()) { if (save) failPending(c, MSG_CANCEL); throw CancellationException("abgebrochen") }
                 val msg = if (e is ParseStop) MSG_TOO_BIG else PlaylistLogic.friendlyError(e)
                 if (e is ParseStop) askNext = true
@@ -716,6 +821,7 @@ object PlaylistStore {
                 if (save) failPending(c, msg)
                 usedCache
             } catch (e: OutOfMemoryError) {
+                LoginDebug.error(u, "load", e)
                 askNext = true
                 if (save) failPending(c, MSG_TOO_BIG)
                 if (rawChannels.isEmpty() || save) error = MSG_TOO_BIG
@@ -795,6 +901,7 @@ object PlaylistStore {
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
+                    LoginDebug.error(u, "background refresh", e)
                     dropRaw(c, u)
                     false
                 } catch (e: OutOfMemoryError) {
