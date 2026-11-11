@@ -14,7 +14,7 @@ import java.io.File
  * genres, running time and trailer. Works without any API key. Only used when TMDB is not set up or does not know the title.
  */
 object ProviderInfo {
-    private val client = Net.base
+    private val client = ProviderGuard.client(Net.base)   // OnAir: provider rate-limit guard
     private const val DAY = 24L * 3600 * 1000
 
     private fun get(url: String): okhttp3.Response? = try {

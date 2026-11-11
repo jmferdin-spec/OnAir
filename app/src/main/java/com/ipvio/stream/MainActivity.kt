@@ -181,11 +181,9 @@ private fun AppContent() {
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { General.cleanupLegacy(ctx) }
         if (resumeAdd) return@LaunchedEffect
-        PlaylistStore.savedUrl(ctx)?.let { u ->
-            val skip = !SettingsLogic.refreshDue(General.plan(), General.lastRefresh, System.currentTimeMillis(), General.zone())
-            val ok = PlaylistStore.load(ctx, u, false, skip)
-            if (ok && !skip) General.markRefreshed(ctx)
-        }
+        // OnAir: app start never asks the provider when something is stored – refreshing is the background job's
+        // (or a button's) business. Only an empty device (first start, wiped data) downloads, with back-off after failures.
+        PlaylistStore.savedUrl(ctx)?.let { u -> PlaylistStore.load(ctx, u, false, true, trigger = RefreshLogic.Trigger.AUTO) }
     }
 
     // Nach der Home-Taste zurück in der App: zur Startseite (eine laufende Wiedergabe und das Hinzufügen bleiben, wie sie sind)
@@ -202,7 +200,7 @@ private fun AppContent() {
     var wasAdding by remember { mutableStateOf(adding) }
     LaunchedEffect(adding) {
         if (wasAdding && !adding && PlaylistStore.channels.isEmpty() && !PlaylistStore.loading) {
-            PlaylistStore.savedUrl(ctx)?.let { PlaylistStore.load(ctx, it, false, true) }
+            PlaylistStore.savedUrl(ctx)?.let { PlaylistStore.load(ctx, it, false, true, trigger = RefreshLogic.Trigger.AUTO) }
         }
         wasAdding = adding
     }

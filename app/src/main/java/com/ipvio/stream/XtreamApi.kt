@@ -45,6 +45,7 @@ object XtreamApi {
 /** OnAir: episodes of a show loaded through player_api (get_series_info), fetched when the show is opened. */
 object SeriesInfo {
     private val cache = LruCache<String, Item>(40)
+    private val client = ProviderGuard.client(Net.base)
 
     fun lazy(item: Item): Boolean = item.kind == Kind.SERIES && item.episodes.isEmpty() && XtreamApiLogic.refsOf(item.tvgId).isNotEmpty()
 
@@ -60,7 +61,7 @@ object SeriesInfo {
                 val url = XtreamApiLogic.apiUrl(r.acct, "get_series_info", "&series_id=${r.seriesId}")
                 val eps = try {
                     LoginDebug.request(url)
-                    Net.base.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+                    client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                         val body = resp.body?.string().orEmpty()
                         LoginDebug.response(url, resp.code, resp.message, body)
                         if (resp.isSuccessful) XtreamApiLogic.episodesOf(body) else emptyList()

@@ -23,10 +23,11 @@ class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         // und holt es nach, sobald der Player zu ist – „zuletzt aktualisiert“ bleibt bis dahin unverändert.
         if (AppNav.playing) return Result.success()
         // App offen: wie bisher laden, damit die Oberfläche den neuen Stand zeigt.
-        // App geschlossen: nur den Zwischenspeicher erneuern – nichts im Arbeitsspeicher, kein TV-Programm-Download.
-        val ok = if (PlaylistStore.hasData) PlaylistStore.load(c, url, false, ask = false) && PlaylistStore.error == null
+        // App geschlossen: nur den Zwischenspeicher erneuern – nichts im Arbeitsspeicher.
+        // OnAir: both paths go through the rate-limit gate (at most every 12 h, back-off after errors) and also renew the
+        // stored TV guide; "last refreshed" is set there on success.
+        if (PlaylistStore.hasData) PlaylistStore.load(c, url, false, ask = false, trigger = RefreshLogic.Trigger.SCHEDULED)
         else PlaylistStore.refreshCacheOnly(c, url)
-        if (ok) General.markRefreshed(c)
         return Result.success()
     }
 }

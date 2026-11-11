@@ -135,7 +135,12 @@ object PlaylistStore {
     @Volatile private var askNext = false
     @Volatile private var call: Call? = null
 
-    private val client = Net.withTimeouts(20, 120)
+    // OnAir: every provider request goes through the rate-limit guard
+    private val client = ProviderGuard.client(Net.withTimeouts(20, 120))
+    /** OnAir: address of the playlist currently shown (to tell "already showing" from "switching account"). */
+    @Volatile private var shownUrl: String? = null
+    /** OnAir: category order taken from the category lists of the last player_api download (saves 3 requests). */
+    @Volatile private var apiOrder: Pair<Int, Map<String, Int>>? = null
 
     private val XTREAM = Regex("""^(https?://[^/]+)/get\.php\?.*?username=([^&]+).*?password=([^&]+)""")
     private const val UA = "IPVIOStream/1.0"
@@ -281,6 +286,14 @@ object PlaylistStore {
         if (lists.isEmpty()) setItems(emptyList())
     }
 
+    /** OnAir: category order – from the player_api download just done if possible, otherwise asked separately. */
+    private fun orderFor(url: String): Map<String, Int> {
+        val o = apiOrder
+        apiOrder = null
+        if (o != null && o.first == key(url) && o.second.isNotEmpty()) return o.second
+        return fetchOrder(url)
+    }
+
     private fun fetchOrder(url: String): Map<String, Int> {
         val m = XTREAM.find(url) ?: return emptyMap()
         val base = "${m.groupValues[1]}/player_api.php?username=${m.groupValues[2]}&password=${m.groupValues[3]}&action="
@@ -314,6 +327,9 @@ object PlaylistStore {
     private fun deleteFiles(c: Context, url: String) {
         val main = listOf(cacheFile(c, url), gzFile(c, url), rawFile(c, url), partFile(c, url), infoFile(c, url), Catchup.file(c, url))
         (main + main.map { tmp(it) }).forEach { runCatching { it.delete() } }
+        // OnAir: the stored guide and refresh state of this account
+        epgFor(url, emptyList()).forEach { Xmltv.deleteFile(c, it) }
+        RefreshGate.forget(c, RefreshGate.catalogKey(url))
     }
 
     private fun writeCache(
@@ -382,18 +398,22 @@ object PlaylistStore {
 
     // ------------------------------------------------------------------ Download
 
-    /** Lädt die Liste in eine Datei, mit bis zu zwei neuen Versuchen bei Verbindungsabbruch (fortgesetzt, wenn der Server es erlaubt). */
+    /**
+     * Lädt die Liste in eine Datei, mit bis zu zwei neuen Versuchen bei Verbindungsabbruch (fortgesetzt, wenn der Server es erlaubt).
+     * OnAir: the retries wait longer each time ([RefreshLogic.IN_RUN_RETRY_MS]); a throttling provider is never retried.
+     */
     private suspend fun downloadWithRetry(c: Context, u: String): Pair<File, Charset> {
+        val waits = RefreshLogic.IN_RUN_RETRY_MS
         var last: IOException? = null
-        for (attempt in 0 until 3) {
+        for (attempt in 0..waits.size) {
             try {
                 return download(c, u)
             } catch (e: IOException) {
-                LoginDebug.error(u, "download attempt ${attempt + 1}/3", e)
+                LoginDebug.error(u, "download attempt ${attempt + 1}/${waits.size + 1}", e)
                 if (cancelled()) throw CancellationException("abgebrochen")
-                if (!PlaylistLogic.retryable(e)) throw e
+                if (e is ProviderBusy || ProviderGuard.coolingDown() || !PlaylistLogic.retryable(e)) throw e
                 last = e
-                if (attempt < 2) { phase = "Verbindung unterbrochen – neuer Versuch …"; delay(3000) }
+                if (attempt < waits.size) { phase = "Verbindung unterbrochen – neuer Versuch …"; delay(waits[attempt]) }
             }
         }
         throw last ?: IOException("Download")
@@ -415,6 +435,8 @@ object PlaylistStore {
         } catch (e: Exception) {
             if (cancelled()) throw CancellationException("abgebrochen")
             LoginDebug.error(u, "player_api", e)
+            // OnAir: the provider is throttling us – asking get.php right away would only make it worse
+            if (e is ProviderBusy || ProviderGuard.coolingDown()) throw e
             LoginDebug.info("player_api failed, falling back to get.php")
             try {
                 return downloadM3u(c, u)
@@ -467,6 +489,7 @@ object PlaylistStore {
         info.writeText(LoadLogic.PartInfo(key(u), null, null, "UTF-8").encode())
         phase = "Playlist wird heruntergeladen …"
         val counts = IntArray(3)
+        val catNames = Array<Collection<String>>(3) { emptyList() }
         part.outputStream().bufferedWriter(Charsets.UTF_8).use { w ->
             w.write("#EXTM3U\n")
             val sections = listOf(
@@ -479,6 +502,7 @@ object PlaylistStore {
                 if (cancelled()) throw CancellationException("abgebrochen")
                 val (cc, cb) = apiText(XtreamApiLogic.apiUrl(a, catAction))
                 val cats = if (cc in 200..299) XtreamApiLogic.categories(cb) else emptyMap()
+                catNames[idx] = cats.values
                 val lu = XtreamApiLogic.apiUrl(a, listAction)
                 LoginDebug.request(lu)
                 val cl = client.newCall(Request.Builder().url(lu).header("User-Agent", UA).build())
@@ -503,6 +527,8 @@ object PlaylistStore {
         if (counts.sum() == 0) throw PlaylistError("Keine Sender in der Playlist gefunden.")
         raw.delete()
         if (!part.renameTo(raw)) throw IOException("Datei konnte nicht umbenannt werden")
+        // sections are live, films, series; the sort order lists films, series, live
+        apiOrder = key(u) to XtreamApiLogic.categoryOrder(catNames[1], catNames[2], catNames[0])
         return raw to Charsets.UTF_8
     }
 
@@ -678,18 +704,37 @@ object PlaylistStore {
         rawFile(c, u).delete(); infoFile(c, u).delete()
     }
 
+    /**
+     * OnAir: [trigger] = why the guide may be fetched (AUTO = from the device; downloaded only if nothing is stored),
+     * [fromNetwork] = the playlist itself was just downloaded (then catch-up details may be asked for too).
+     */
     private fun show(
         c: Context, u: String, items: List<Item>, epg: List<String>, order: Map<String, Int>,
-        counts: Map<String, Int>, bytes: Map<String, Long>, hidden: Set<String>
+        counts: Map<String, Int>, bytes: Map<String, Long>, hidden: Set<String>,
+        trigger: RefreshLogic.Trigger = RefreshLogic.Trigger.AUTO, fromNetwork: Boolean = false
     ) {
         epgUrls = epg
         catOrder = order
         langCounts = counts
         langBytes = bytes
         shownHidden = hidden
+        shownUrl = u
         setItems(items, shownOf(items))
-        Catchup.start(c, u, items)
-        Xmltv.start(c, epg, items)
+        Catchup.start(c, u, items, allowNetwork = fromNetwork)
+        Xmltv.start(c, epg, items, trigger)
+    }
+
+    /** OnAir: message when a refresh is held back (provider asked us to wait, or it was just asked). */
+    private fun waitMsg(c: Context, key: String, trigger: RefreshLogic.Trigger, hasCache: Boolean): String {
+        val at = RefreshGate.nextAllowedAt(c, key, trigger, hasCache) ?: System.currentTimeMillis()
+        return "Der Anbieter wurde gerade erst abgefragt. Neuer Versuch ab ${hhmm(at / 1000)} möglich."   // translated when shown
+    }
+
+    /** OnAir: error text; a throttled provider gets its own message. */
+    private fun errorText(e: Throwable): String = when (e) {
+        is ProviderBusy -> PlaylistLogic.httpError(429)
+        is ParseStop -> MSG_TOO_BIG
+        else -> PlaylistLogic.friendlyError(e)
     }
 
     private enum class Local { OK, NONE, FAILED }
@@ -731,7 +776,7 @@ object PlaylistStore {
             throw e
         } catch (e: Exception) {
             if (cancelled()) throw CancellationException("abgebrochen")
-            error = if (e is ParseStop) MSG_TOO_BIG else PlaylistLogic.friendlyError(e)
+            error = errorText(e)
             Local.FAILED
         } catch (e: OutOfMemoryError) {
             error = MSG_TOO_BIG
@@ -742,14 +787,16 @@ object PlaylistStore {
     /**
      * Lädt eine Playlist. [save] = neu hinzugefügt (wird erst bei Erfolg in die Liste übernommen, aber vorher gemerkt),
      * [ask] = bei sehr großen Listen nach den Sprachen fragen dürfen (nicht im Hintergrund), [resumed] = automatisch fortgesetzt.
+     * OnAir: [trigger] decides whether the provider may be asked ([RefreshLogic]): MANUAL for buttons and login,
+     * SCHEDULED for the background job, AUTO for app start and switching (cache only, unless nothing is stored).
      */
     suspend fun load(
         c: Context, url: String, save: Boolean, skipNetworkWhenCached: Boolean = false,
-        ask: Boolean = true, resumed: Boolean = false
+        ask: Boolean = true, resumed: Boolean = false, trigger: RefreshLogic.Trigger = RefreshLogic.Trigger.MANUAL
     ): Boolean {
         if (!loadLock.tryLock()) return rawChannels.isNotEmpty()
         try {
-            return loadInner(c, url, save, skipNetworkWhenCached, ask, resumed)
+            return loadInner(c, url, save, skipNetworkWhenCached, ask, resumed, trigger)
         } finally {
             loading = false   // auch bei Abbruch: sonst bliebe der Ladezustand (und die Bildschirm-Wachhaltung) hängen
             heavy = false
@@ -761,7 +808,10 @@ object PlaylistStore {
         }
     }
 
-    private suspend fun loadInner(c: Context, url: String, save: Boolean, skipNetworkWhenCached: Boolean, ask: Boolean, resumed: Boolean): Boolean {
+    private suspend fun loadInner(
+        c: Context, url: String, save: Boolean, skipNetworkWhenCached: Boolean, ask: Boolean, resumed: Boolean,
+        trigger: RefreshLogic.Trigger
+    ): Boolean {
         ensure(c)
         val u = PlaylistLogic.normalizeUrl(url) ?: run { error = "Bitte eine gültige Adresse eingeben (beginnt mit http:// oder https://)."; return false }
         job = currentCoroutineContext()[Job]
@@ -775,8 +825,13 @@ object PlaylistStore {
             writePending(c, LoadLogic.started(prev, u, resumed))
         }
         if (askNext && ask) forceAsk = true
+        // OnAir: this playlist is already on screen and only the stored copy is wanted – nothing to do
+        if (skipNetworkWhenCached && rawChannels.isNotEmpty() && shownUrl == u) {
+            if (save) finishSave(c, u)
+            return true
+        }
         var usedCache = false
-        if (rawChannels.isEmpty()) {
+        if (rawChannels.isEmpty() || shownUrl != u) {
             val r = withContext(Dispatchers.IO) { fromLocal(c, u, allowGz = skipNetworkWhenCached, ask = ask) }
             usedCache = r == Local.OK
         }
@@ -784,13 +839,25 @@ object PlaylistStore {
             if (save) finishSave(c, u)
             return true
         }
+        // OnAir: rate-limit gate – only ask the provider when the trigger allows it (see RefreshLogic)
+        val gateKey = RefreshGate.catalogKey(u)
+        val hasCache = usedCache || (rawChannels.isNotEmpty() && shownUrl == u)
+        if (!RefreshGate.allowed(c, gateKey, trigger, hasCache)) {
+            val msg = waitMsg(c, gateKey, trigger, hasCache)
+            if (trigger == RefreshLogic.Trigger.MANUAL || !hasCache) error = msg
+            if (save) failPending(c, msg)
+            return hasCache
+        }
         error = null
         val before = sig(rawChannels)
         heavy = true
         if (loadStarted == 0L) loadStarted = System.currentTimeMillis()
+        var fetched = false
         val ok = withContext(Dispatchers.IO) {
             try {
                 val (src, cs) = downloadWithRetry(c, u)
+                fetched = true
+                RefreshGate.succeeded(c, gateKey)
                 val gzTmp = tmp(gzFile(c, u))
                 val b = build(c, src, false, cs, ask, gzTmp, forceAsk)
                 val parsed = b.parsed
@@ -798,24 +865,31 @@ object PlaylistStore {
                 downloadDone = true
                 val urls = epgFor(u, parsed.epgUrls)
                 phase = "Kategorien werden sortiert …"
-                val order = fetchOrder(u)
+                val order = orderFor(u)
                 phase = "Playlist wird gespeichert …"
                 writeCache(c, u, parsed.items, urls, order, parsed.counts, parsed.bytes, b.hidden)
                 Catchup.saveParsed(c, u, parsed.catchup)
                 commitGz(c, u, gzTmp)
                 val list = parsed.items
-                if (sig(list) != before || !usedCache || b.hidden != shownHidden) show(c, u, list, urls, order, parsed.counts, parsed.bytes, b.hidden)
-                else { epgUrls = urls; catOrder = order; langCounts = parsed.counts; langBytes = parsed.bytes; Catchup.start(c, u, list) }
+                if (sig(list) != before || !usedCache || b.hidden != shownHidden) show(c, u, list, urls, order, parsed.counts, parsed.bytes, b.hidden, trigger, true)
+                else {
+                    epgUrls = urls; catOrder = order; langCounts = parsed.counts; langBytes = parsed.bytes; shownUrl = u
+                    Catchup.start(c, u, list, allowNetwork = true)
+                    Xmltv.start(c, urls, list, trigger)
+                }
+                General.markRefreshed(c)
                 if (save) finishSave(c, u)
                 askNext = false
                 true
             } catch (e: CancellationException) {
+                if (!fetched) RefreshGate.attempted(c, gateKey)
                 if (save) failPending(c, MSG_CANCEL)
                 throw e
             } catch (e: Exception) {
                 LoginDebug.error(u, "load", e)
-                if (cancelled()) { if (save) failPending(c, MSG_CANCEL); throw CancellationException("abgebrochen") }
-                val msg = if (e is ParseStop) MSG_TOO_BIG else PlaylistLogic.friendlyError(e)
+                if (cancelled()) { if (!fetched) RefreshGate.attempted(c, gateKey); if (save) failPending(c, MSG_CANCEL); throw CancellationException("abgebrochen") }
+                if (!fetched) RefreshGate.failed(c, gateKey)
+                val msg = errorText(e)
                 if (e is ParseStop) askNext = true
                 if (rawChannels.isEmpty() || save) error = msg
                 if (save) failPending(c, msg)
@@ -858,7 +932,7 @@ object PlaylistStore {
             val r = withContext(Dispatchers.IO) { fromLocal(c, u, allowGz = true, ask = false) }
             when (r) {
                 Local.OK -> {}
-                Local.NONE -> return loadInner(c, u, false, false, false, false).let { true }
+                Local.NONE -> return loadInner(c, u, false, false, false, false, RefreshLogic.Trigger.AUTO).let { true }
                 Local.FAILED -> {
                     // Neue Auswahl passt nicht: alte Auswahl wiederherstellen (und, falls schon freigegeben, wieder einlesen)
                     val msg = error
@@ -885,23 +959,34 @@ object PlaylistStore {
     suspend fun refreshCacheOnly(c: Context, url: String): Boolean {
         ensure(c)
         val u = PlaylistLogic.normalizeUrl(url) ?: return false
+        // OnAir: rate-limit gate (12 h since the last success, back-off after failures)
+        val gateKey = RefreshGate.catalogKey(u)
+        if (!RefreshGate.allowed(c, gateKey, RefreshLogic.Trigger.SCHEDULED, cacheFile(c, u).exists())) return false
         if (!loadLock.tryLock()) return false
         try {
             job = currentCoroutineContext()[Job]
+            var fetched = false
             return withContext(Dispatchers.IO) {
                 try {
                     val (src, cs) = downloadWithRetry(c, u)
+                    fetched = true
+                    RefreshGate.succeeded(c, gateKey)
                     val gzTmp = tmp(gzFile(c, u))
                     val b = build(c, src, false, cs, false, gzTmp)
                     if (b.parsed.counts.isEmpty()) return@withContext false
-                    writeCache(c, u, b.parsed.items, epgFor(u, b.parsed.epgUrls), fetchOrder(u), b.parsed.counts, b.parsed.bytes, b.hidden)
+                    val urls = epgFor(u, b.parsed.epgUrls)
+                    writeCache(c, u, b.parsed.items, urls, orderFor(u), b.parsed.counts, b.parsed.bytes, b.hidden)
                     Catchup.saveParsed(c, u, b.parsed.catchup)
                     commitGz(c, u, gzTmp)
+                    General.markRefreshed(c)
+                    // OnAir: the guide is stored on the device too, so the next app start needs no download
+                    Xmltv.refreshFiles(c, urls, RefreshLogic.Trigger.SCHEDULED)
                     true
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     LoginDebug.error(u, "background refresh", e)
+                    if (!fetched) RefreshGate.failed(c, gateKey)
                     dropRaw(c, u)
                     false
                 } catch (e: OutOfMemoryError) {
@@ -926,7 +1011,8 @@ object PlaylistStore {
     fun clear(c: Context) {
         ensure(c)
         lists.forEach { deleteFiles(c, it.url) }
-        lists.clear(); persist(c); setItems(emptyList()); langCounts = emptyMap(); langBytes = emptyMap()
+        Xmltv.deleteAll(c)
+        lists.clear(); persist(c); setItems(emptyList()); langCounts = emptyMap(); langBytes = emptyMap(); shownUrl = null
     }
 }
 

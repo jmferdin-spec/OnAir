@@ -4,12 +4,14 @@ import android.content.Context
 import android.util.Base64
 import android.util.Xml
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -18,12 +20,18 @@ import okhttp3.Request
 import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
+import java.util.zip.Deflater
 import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 
 private val FMT = object : ThreadLocal<HashMap<String, SimpleDateFormat>>() {
     override fun initialValue() = HashMap<String, SimpleDateFormat>()
@@ -48,7 +56,8 @@ fun dayLabel(sec: Long): String = fmt("EE dd.MM.").format(Date(sec * 1000))
 
 /** Gemeinsamer Netzwerkzugang für Programminfos: ein Client (Verbindungen werden wiederverwendet) und höchstens 6 Abfragen gleichzeitig. */
 object EpgNet {
-    val client = Net.withTimeouts(8, 12)
+    // OnAir: per-channel guide lookups go through the provider rate-limit guard as well
+    val client = ProviderGuard.client(Net.withTimeouts(8, 12))
     val gate = Semaphore(6)
 
     suspend fun fetch(url: String): String? = gate.withPermit {
@@ -75,10 +84,137 @@ fun epgSane(start: Long, end: Long): Boolean {
 object Xmltv {
     var status by mutableStateOf("Noch nicht geladen")
     var channelCount by mutableStateOf(0)
+    /** OnAir: when the newest stored guide was downloaded (0 = none), for the settings screen. */
+    var storedAt by mutableLongStateOf(0L)
+        private set
     private val progs = ConcurrentHashMap<String, List<EpgEntry>>()
-    private val client = Net.withTimeouts(20, 180)
+    private val client = ProviderGuard.client(Net.withTimeouts(20, 180))
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
+
+    // ------------------------------------------------------------------ OnAir: guide stored on the device
+    // The XMLTV answer is kept gzip-compressed per address (epg_<hash>.xml.gz – the address itself contains the password,
+    // so only its hash is used). App start reads it from there; only the refresh schedule or a button downloads it again.
+
+    private const val PRUNE_MS = 3 * 86_400_000L
+    private const val SPACE_RESERVE = 64L * 1024 * 1024
+
+    fun file(c: Context, url: String) = File(c.filesDir, "epg_" + url.trim().hashCode() + ".xml.gz")
+    private fun tmpOf(f: File) = File(f.path + ".tmp")
+
+    fun deleteFile(c: Context, url: String) {
+        val f = file(c, url)
+        runCatching { f.delete(); tmpOf(f).delete() }
+        RefreshGate.forget(c, RefreshGate.epgKey(url))
+    }
+
+    fun deleteAll(c: Context) {
+        runCatching { c.filesDir.listFiles { f -> f.name.startsWith("epg_") }?.forEach { it.delete() } }
+    }
+
+    /** Stored guides of addresses no longer in use (other account, changed custom address) – deleted after 3 days. */
+    private fun prune(c: Context, keep: Collection<String>) {
+        runCatching {
+            val names = keep.map { file(c, it).name }.toSet()
+            val now = System.currentTimeMillis()
+            c.filesDir.listFiles { f -> f.name.startsWith("epg_") }
+                ?.filter { (it.name !in names && now - it.lastModified() > PRUNE_MS) || it.name.endsWith(".tmp") }
+                ?.forEach { it.delete() }
+        }
+    }
+
+    private fun allUrls(c: Context, urls: List<String>) = (urls + listOf(customUrl(c))).filter { it.startsWith("http") }.distinct()
+
+    /**
+     * Downloads [url] into its file when the refresh gate allows it ([trigger]); the old file stays until a complete,
+     * valid answer has arrived. Returns an error text, or null (downloaded, or not due and the stored copy is used).
+     */
+    private fun fetchIfAllowed(c: Context, url: String, trigger: RefreshLogic.Trigger, active: () -> Boolean): String? {
+        val f = file(c, url)
+        val key = RefreshGate.epgKey(url)
+        if (!RefreshGate.allowed(c, key, trigger, f.exists() && f.length() > 0)) return null
+        val t = tmpOf(f)
+        return try {
+            download(c, url, t, active)
+            if (!looksLikeXmltv(t)) throw PlaylistError("leer")
+            f.delete()
+            if (!t.renameTo(f)) throw java.io.IOException("rename")
+            RefreshGate.succeeded(c, key)
+            null
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            t.delete(); RefreshGate.attempted(c, key); throw e
+        } catch (e: Exception) {
+            t.delete()
+            LoginDebug.error(url, "xmltv download", e)
+            if (!active()) RefreshGate.attempted(c, key) else RefreshGate.failed(c, key)
+            when (e) {
+                is ProviderBusy -> "HTTP 429"
+                is PlaylistError -> e.message
+                else -> e.javaClass.simpleName
+            }
+        }
+    }
+
+    /** Streams the answer to [to], gzip-compressed (kept as it is if the server already sends gzip). */
+    private fun download(c: Context, url: String, to: File, active: () -> Boolean) {
+        LoginDebug.request(url)
+        client.newCall(Request.Builder().url(url).build()).execute().use { r ->
+            if (BuildConfig.DEBUG) LoginDebug.response(url, r.code, r.message, runCatching { r.peekBody(1024).string() }.getOrDefault("<unreadable>"))
+            if (!r.isSuccessful) throw PlaylistError("HTTP ${r.code}")
+            val body = r.body ?: throw PlaylistError("leer")
+            val len = body.contentLength()
+            if (len > 0 && c.filesDir.usableSpace < len + SPACE_RESERVE) throw PlaylistError(PlaylistLogic.NO_SPACE)
+            val ins = BufferedInputStream(body.byteStream(), 1 shl 16)
+            ins.mark(2)
+            val gz = ins.read() == 0x1f && ins.read() == 0x8b
+            ins.reset()
+            FileOutputStream(to).use { fo ->
+                val out = if (gz) BufferedOutputStream(fo, 1 shl 16)
+                else object : GZIPOutputStream(BufferedOutputStream(fo, 1 shl 16), 1 shl 16) { init { def.setLevel(Deflater.BEST_SPEED) } }
+                val buf = ByteArray(1 shl 16)
+                var n = 0L
+                var checked = 0L
+                while (true) {
+                    val k = ins.read(buf)
+                    if (k < 0) break
+                    out.write(buf, 0, k)
+                    n += k
+                    if (n - checked >= 1L shl 20) {
+                        checked = n
+                        if (!active()) throw kotlinx.coroutines.CancellationException("abgebrochen")
+                    }
+                }
+                (out as? GZIPOutputStream)?.finish()
+                out.flush()
+            }
+        }
+    }
+
+    /** A stored answer that is not XMLTV (empty, HTML error page) must not replace a good one. */
+    private fun looksLikeXmltv(f: File): Boolean = try {
+        openStored(f).use { ins ->
+            val head = ByteArray(2048)
+            val n = ins.read(head)
+            n > 0 && String(head, 0, n, Charsets.UTF_8).let { it.contains("<tv") || it.contains("<?xml") }
+        }
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun openStored(f: File): InputStream {
+        val ins = BufferedInputStream(FileInputStream(f), 1 shl 16)
+        ins.mark(2)
+        val gz = ins.read() == 0x1f && ins.read() == 0x8b
+        ins.reset()
+        return if (gz) GZIPInputStream(ins, 1 shl 16) else ins
+    }
+
+    /** Background job with the app closed: only renew the stored guide files (no parsing, nothing kept in memory). */
+    fun refreshFiles(c: Context, urls: List<String>, trigger: RefreshLogic.Trigger) {
+        val all = allUrls(c, urls)
+        for (u in all) fetchIfAllowed(c, u, trigger) { true }
+        prune(c, all)
+    }
 
     private fun prefs(c: Context) = c.getSharedPreferences("ipvio_epg", Context.MODE_PRIVATE)
     fun customUrl(c: Context): String = prefs(c).getString("custom", "") ?: ""
@@ -91,15 +227,20 @@ object Xmltv {
      * Lädt das XMLTV-Programm für die sichtbaren Sender (ausgeblendete Sprachen kommen gar nicht erst an).
      * Gespeichert wird nur das Nötige: Fenster −1 h bis +36 h, höchstens 80 Sendungen je Sender, Beschreibung gekürzt,
      * gleiche Titel nur einmal. Wird der Speicher knapp, hört das Einlesen auf und behält das bis dahin Gelesene.
+     *
+     * OnAir: read from the guide stored on the device. It is downloaded only when [trigger] allows it (see [RefreshLogic]):
+     * AUTO = only if nothing is stored yet, SCHEDULED = at most every 12 h, MANUAL = the owner pressed a button.
      */
-    fun start(c: Context, urls: List<String>, items: List<Item>) {
-        val all = (urls + listOf(customUrl(c))).filter { it.startsWith("http") }.distinct()
+    fun start(c: Context, urls: List<String>, items: List<Item>, trigger: RefreshLogic.Trigger = RefreshLogic.Trigger.AUTO) {
+        val app = c.applicationContext
+        val all = allUrls(app, urls)
         if (all.isEmpty()) { status = "Keine EPG-Adresse gefunden"; return }
         val wanted = items.filter { it.kind == Kind.LIVE }.mapNotNull { it.tvgId?.lowercase() }.toSet()
         if (wanted.isEmpty()) { status = "Playlist enthält keine Sender-IDs (tvg-id)"; return }
         job?.cancel()
         job = scope.launch {
             status = "Wird geladen …"
+            val active = { isActive }
             val map = HashMap<String, MutableList<EpgEntry>>()
             var err: String? = null
             truncated = false
@@ -111,9 +252,17 @@ object Xmltv {
                 val k = id.lowercase()
                 past[k] = maxOf(past[k] ?: 0, d.coerceAtMost(7))
             }
+            var newest = 0L
             for (u in all) {
-                try { parse(u, wanted, map, past) } catch (e: Exception) { LoginDebug.error(u, "xmltv", e); err =if (e is PlaylistError) e.message else e.javaClass.simpleName }
+                fetchIfAllowed(app, u, trigger, active)?.let { err = it }
+                val f = file(app, u)
+                if (!f.exists()) continue
+                newest = maxOf(newest, f.lastModified())
+                try { parse(f, wanted, map, past) } catch (e: Exception) { LoginDebug.error(u, "xmltv", e); err = if (e is PlaylistError) e.message else e.javaClass.simpleName }
             }
+            if (!isActive) return@launch
+            prune(app, all)
+            storedAt = newest
             progs.clear()
             for ((k, v) in map) progs[k] = v.sortedBy { it.start }
             channelCount = progs.size
@@ -133,17 +282,9 @@ object Xmltv {
     private fun shortDesc(d: String): String =
         if (d.length <= MAX_DESC) d else d.substring(0, d.lastIndexOf(' ', MAX_DESC).takeIf { it > MAX_DESC / 2 } ?: MAX_DESC) + " …"
 
-    private fun parse(url: String, wanted: Set<String>, out: HashMap<String, MutableList<EpgEntry>>, past: Map<String, Int> = emptyMap()) {
-        LoginDebug.request(url)
-        client.newCall(Request.Builder().url(url).build()).execute().use { r ->
-            if (BuildConfig.DEBUG) LoginDebug.response(url, r.code, r.message, runCatching { r.peekBody(1024).string() }.getOrDefault("<unreadable>"))
-            if (!r.isSuccessful) throw PlaylistError("HTTP ${r.code}")
-            var ins: InputStream = BufferedInputStream((r.body ?: throw PlaylistError("leer")).byteStream())
-            ins.mark(2)
-            val b1 = ins.read()
-            val b2 = ins.read()
-            ins.reset()
-            if (b1 == 0x1f && b2 == 0x8b) ins = GZIPInputStream(ins)
+    /** OnAir: parses a stored guide file (see [file]). */
+    private fun parse(f: File, wanted: Set<String>, out: HashMap<String, MutableList<EpgEntry>>, past: Map<String, Int> = emptyMap()) {
+        openStored(f).use { ins ->
             val p = Xml.newPullParser()
             p.setInput(ins, null)
             val now = System.currentTimeMillis() / 1000
@@ -237,18 +378,22 @@ object Epg {
     suspend fun now(item: Item): List<EpgEntry> {
         val nowMs = System.currentTimeMillis()
         val nowSec = nowMs / 1000
-        cache[item.id]?.let { if (nowMs - it.first < 120_000) return it.second }
         val local = Xmltv.forChannel(item.tvgId).filter { it.end > nowSec }
         if (local.isNotEmpty() && current(local) != null) return local.take(8)
+        // OnAir: per-channel answers are reused for 15 min (finished programmes dropped), "nothing" for 30 min –
+        // scrolling the guide must not send one request per row again and again
+        cache[item.id]?.let { (at, l) ->
+            val ttl = if (l.isEmpty()) RefreshLogic.CHANNEL_EPG_EMPTY_TTL_MS else RefreshLogic.CHANNEL_EPG_TTL_MS
+            if (nowMs - at in 0 until ttl) return l.filter { it.end > nowSec }.ifEmpty { local.take(8) }
+        }
         val url = xtreamApi(item, "get_short_epg")
-        if (url != null) {
+        if (url != null && !ProviderGuard.coolingDown(nowMs)) {
             LoginDebug.request("$url&limit=8")
             val body = EpgNet.fetch("$url&limit=8")
             if (BuildConfig.DEBUG) LoginDebug.info("get_short_epg fallback: " + (if (body == null) "failed" else "${body.length} chars"))
-            if (body != null) {
-                val out = parseListings(body)
-                if (out.isNotEmpty()) { cache[item.id] = nowMs to out; return out }
-            }
+            val out = if (body != null) parseListings(body) else emptyList()
+            cache[item.id] = nowMs to out
+            if (out.isNotEmpty()) return out
         }
         return local.take(8)
     }

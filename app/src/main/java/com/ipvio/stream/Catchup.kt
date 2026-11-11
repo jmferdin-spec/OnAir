@@ -23,7 +23,7 @@ import java.util.TimeZone
  */
 object Catchup {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val client = Net.withTimeouts(15, 90)
+    private val client = ProviderGuard.client(Net.withTimeouts(15, 90))
     private const val REFRESH_MS = 24 * 3600_000L
 
     @Volatile private var map: Map<String, CatchupInfo> = emptyMap()
@@ -112,8 +112,12 @@ object Catchup {
 
     fun delete(c: Context, url: String) { runCatching { file(c, url).delete() } }
 
-    /** Die Playlist wird angezeigt: Archiv-Angaben übernehmen; bei Xtream-Servern höchstens einmal am Tag nachfragen. */
-    fun start(c: Context, url: String, items: List<Item>) {
+    /**
+     * Die Playlist wird angezeigt: Archiv-Angaben übernehmen; bei Xtream-Servern höchstens einmal am Tag nachfragen.
+     * OnAir: [allowNetwork] = only when the playlist itself was just refreshed – never on app start from the stored copy
+     * (player_api logins already carry the archive days in the playlist).
+     */
+    fun start(c: Context, url: String, items: List<Item>, allowNetwork: Boolean = false) {
         val app = c.applicationContext
         job?.cancel()
         // Gespeicherte Angaben sofort (kleine Datei; der TV-Guide braucht sie gleich beim Einlesen des Programms)
@@ -121,6 +125,7 @@ object Catchup {
         val live = HashMap<String, String>()
         for (it in items) if (it.kind == Kind.LIVE) live[it.id] = it.url
         apply(CatchupLogic.merge(live, s.xt, s.m3u), s.tz)
+        if (!allowNetwork) return
         val x = live.values.firstNotNullOfOrNull { CatchupLogic.xtreamLive(it) } ?: return
         if (System.currentTimeMillis() - s.xtAt < REFRESH_MS) return
         job = scope.launch {

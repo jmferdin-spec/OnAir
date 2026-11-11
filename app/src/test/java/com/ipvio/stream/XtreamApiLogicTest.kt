@@ -55,6 +55,22 @@ class XtreamApiLogicTest {
 
     private val cats = mapOf("5" to "US| SPORTS", "9" to "US| MOVIE CHANNELS", "20" to "Action \"Hits\"", "30" to "Drama")
 
+    @Test fun categoriesKeepServerOrder() {
+        val c = XtreamApiLogic.categories("""[{"category_id":"30","category_name":"Z LAST"},{"category_id":"2","category_name":"A FIRST"},{"category_id":"11","category_name":"M MIDDLE"}]""")
+        assertEquals(listOf("Z LAST", "A FIRST", "M MIDDLE"), c.values.toList())
+    }
+
+    /** OnAir: the sort order comes from the category lists of the download itself (no 3 extra requests). */
+    @Test fun categoryOrderFilmsSeriesLiveFirstWins() {
+        val o = XtreamApiLogic.categoryOrder(
+            vod = listOf("ACTION", "COMEDY"),
+            series = listOf("DRAMA", "COMEDY"),
+            live = listOf("US| SPORTS", "", "ACTION")
+        )
+        assertEquals(mapOf("ACTION" to 0, "COMEDY" to 1, "DRAMA" to 0, "US| SPORTS" to 0), o)
+        assertTrue(XtreamApiLogic.categoryOrder(emptyList(), emptyList(), emptyList()).isEmpty())
+    }
+
     @Test fun liveEntryLine() {
         val s = XtreamApiLogic.liveEntry(mapOf("stream_id" to "101", "name" to "US: Sports Net HD", "epg_channel_id" to "sportsnet.us",
             "stream_icon" to "http://img.test/s.png", "category_id" to "5", "tv_archive" to "1", "tv_archive_duration" to "3"), cats, a, "ts")!!

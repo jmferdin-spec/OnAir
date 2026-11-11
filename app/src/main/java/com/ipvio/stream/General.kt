@@ -22,8 +22,8 @@ object General {
     /** Zuletzt gesehenen Film / zuletzt gesehene Serie beim Start an der gemerkten Stelle fortsetzen. */
     var resumeVod by mutableStateOf(false)
     var confirmExit by mutableStateOf(true)
-    /** Playlist-Aktualisierung: 0 = bei jedem Start, 1 = alle X Stunden, 2 = täglich, 3 = wöchentlich, 4 = nur von Hand */
-    var refreshMode by mutableIntStateOf(0)
+    /** Playlist-Aktualisierung: 1 = alle X Stunden, 2 = täglich, 3 = wöchentlich, 4 = nur von Hand (OnAir: 0 „bei jedem Start“ entfällt) */
+    var refreshMode by mutableIntStateOf(1)
     var refreshInterval by mutableIntStateOf(12)
     var refreshHour by mutableIntStateOf(4)
     var refreshMinute by mutableIntStateOf(0)
@@ -106,8 +106,9 @@ object General {
         resumeLive = p.getBoolean("resume_live", false)
         resumeVod = p.getBoolean("resume_vod", false)
         confirmExit = p.getBoolean("confirm_exit", true)
-        refreshMode = p.getInt("refresh_mode", 0).coerceIn(0, 4)
-        refreshInterval = p.getInt("refresh_interval", 12).coerceIn(1, 168)
+        // OnAir: "at every start" (0) is gone (provider rate limits) – old setting becomes "every 12 hours"; intervals ≥ 12 h
+        refreshMode = p.getInt("refresh_mode", 1).let { if (it == 0) 1 else it }.coerceIn(1, 4)
+        refreshInterval = p.getInt("refresh_interval", 12).coerceIn(12, 168)
         refreshHour = p.getInt("refresh_hour", 4).coerceIn(0, 23)
         refreshMinute = p.getInt("refresh_minute", 0).coerceIn(0, 59)
         refreshDow = p.getInt("refresh_dow", java.util.Calendar.MONDAY).coerceIn(1, 7)
@@ -138,7 +139,7 @@ object General {
     fun setResumeVod(c: Context, v: Boolean) { resumeVod = v; prefs(c).edit().putBoolean("resume_vod", v).apply() }
     fun setConfirmExit(c: Context, v: Boolean) { confirmExit = v; prefs(c).edit().putBoolean("confirm_exit", v).apply() }
     fun setPlan(c: Context, mode: Int = refreshMode, interval: Int = refreshInterval, hour: Int = refreshHour, minute: Int = refreshMinute, dow: Int = refreshDow) {
-        refreshMode = mode.coerceIn(0, 4); refreshInterval = interval.coerceIn(1, 168)
+        refreshMode = mode.coerceIn(1, 4); refreshInterval = interval.coerceIn(12, 168)   // OnAir: see init
         refreshHour = hour.coerceIn(0, 23); refreshMinute = minute.coerceIn(0, 59); refreshDow = dow.coerceIn(1, 7)
         prefs(c).edit().putInt("refresh_mode", refreshMode).putInt("refresh_interval", refreshInterval).putInt("refresh_hour", refreshHour)
             .putInt("refresh_minute", refreshMinute).putInt("refresh_dow", refreshDow).apply()

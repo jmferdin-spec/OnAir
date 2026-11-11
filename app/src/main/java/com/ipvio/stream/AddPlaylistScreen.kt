@@ -49,7 +49,7 @@ fun AddPlaylistScreen(onDone: () -> Unit) {
                 val u = if (inp.isXtream) PlaylistStore.xtreamUrl(inp.host, inp.user, inp.pass) else inp.url
                 if (inp.isXtream) { xtream = true; host = inp.host; user = inp.user; pass = inp.pass } else { xtream = false; url = inp.url }
                 if (u == null) PlaylistStore.error = "Angaben unvollständig: Server, Benutzername und Passwort nötig."
-                else scope.launch { if (PlaylistStore.load(ctx, u, true)) onDone() }
+                else scope.launch { if (PlaylistStore.load(ctx, u, true, skipNetworkWhenCached = true)) onDone() }   // OnAir: same account stored → no download
             }
         }
     }
@@ -65,7 +65,7 @@ fun AddPlaylistScreen(onDone: () -> Unit) {
     LaunchedEffect(Unit) {
         val p = pend ?: return@LaunchedEffect
         when {
-            p.autoResume && !PlaylistStore.loading -> { if (PlaylistStore.load(ctx, p.url, true, resumed = true)) onDone() }
+            p.autoResume && !PlaylistStore.loading -> { if (PlaylistStore.load(ctx, p.url, true, skipNetworkWhenCached = true, resumed = true, trigger = RefreshLogic.Trigger.AUTO)) onDone() }
             p.interrupted -> PlaylistStore.error = "Das Laden wurde mehrmals unterbrochen. Deine Angaben sind gespeichert – drücke „Hinzufügen“, um es erneut zu versuchen."
             p.msg != null -> PlaylistStore.error = p.msg
         }
@@ -118,7 +118,7 @@ fun AddPlaylistScreen(onDone: () -> Unit) {
                     if (PlaylistStore.loading) return@FocusButton
                     val finalUrl = if (xtream) PlaylistStore.xtreamUrl(host, user, pass) else url
                     if (finalUrl == null) PlaylistStore.error = "Angaben unvollständig: Server, Benutzername und Passwort nötig."
-                    else scope.launch { if (PlaylistStore.load(ctx, finalUrl, true)) onDone() }
+                    else scope.launch { if (PlaylistStore.load(ctx, finalUrl, true, skipNetworkWhenCached = true)) onDone() }   // OnAir: same account stored → no download
                 }
                 if (canCancel) FocusButton("Abbrechen") { PlaylistStore.clearPending(ctx); onDone() }
             }

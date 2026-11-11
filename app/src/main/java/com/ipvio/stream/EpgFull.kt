@@ -11,20 +11,23 @@ object EpgFull {
     suspend fun get(item: Item): List<EpgEntry> {
         val nowMs = System.currentTimeMillis()
         val nowSec = nowMs / 1000
-        cache[item.id]?.let { if (nowMs - it.first < 600_000) return it.second }
         val days = Catchup.of(item)?.days ?: 0
         val from = if (days > 0) nowSec - days * 86400L else nowSec - 3600
         val local = Xmltv.forChannel(item.tvgId).filter { it.end > from }
         // Mit Archiv reicht XMLTV nur, wenn es auch vergangene Sendungen enthält
         val localOk = local.size >= 3 && local.any { it.end > nowSec } && (days == 0 || local.first().start <= nowSec - 6 * 3600)
         if (localOk) return local
+        // OnAir: answers reused 15 min, "nothing / failed" 30 min (no repeated requests for the same channel)
+        cache[item.id]?.let { (at, l) ->
+            val ttl = if (l.isEmpty()) RefreshLogic.CHANNEL_EPG_EMPTY_TTL_MS else RefreshLogic.CHANNEL_EPG_TTL_MS
+            if (nowMs - at in 0 until ttl) return if (l.isNotEmpty()) l else if (local.isNotEmpty()) local else Epg.now(item)
+        }
         val url = Epg.xtreamApi(item, "get_simple_data_table")
-        if (url != null) {
+        if (url != null && !ProviderGuard.coolingDown(nowMs)) {
             val body = EpgNet.fetch(url)
-            if (body != null) {
-                val out = Epg.parseListings(body) { _, e -> e > from }
-                if (out.isNotEmpty()) { cache[item.id] = nowMs to out; return out }
-            }
+            val out = if (body != null) Epg.parseListings(body) { _, e -> e > from } else emptyList()
+            cache[item.id] = nowMs to out
+            if (out.isNotEmpty()) return out
         }
         if (local.isNotEmpty()) return local
         return Epg.now(item)

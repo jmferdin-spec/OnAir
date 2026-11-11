@@ -60,7 +60,7 @@ object XtreamApiLogic {
 
     /** Category id → name from a get_*_categories answer. */
     fun categories(json: String): Map<String, String> {
-        val out = HashMap<String, String>()
+        val out = LinkedHashMap<String, String>()   // server order (used for the category sort order)
         val a = try { JSONArray(json.trim()) } catch (e: Exception) { return out }
         for (i in 0 until a.length()) {
             val o = a.optJSONObject(i) ?: continue
@@ -68,6 +68,17 @@ object XtreamApiLogic {
             val n = o.optString("category_name").trim()
             if (id.isNotEmpty() && n.isNotEmpty()) out[id] = n
         }
+        return out
+    }
+
+    /**
+     * Category sort order (name → position in its list) from the category lists already fetched during the download,
+     * so no extra requests are needed. Films first, then series, then live – the first occurrence of a name wins
+     * (same rule as the old separate category requests).
+     */
+    fun categoryOrder(vod: Collection<String>, series: Collection<String>, live: Collection<String>): Map<String, Int> {
+        val out = LinkedHashMap<String, Int>()
+        for (l in listOf(vod, series, live)) l.forEachIndexed { i, n -> if (n.isNotBlank() && !out.containsKey(n)) out[n] = i }
         return out
     }
 

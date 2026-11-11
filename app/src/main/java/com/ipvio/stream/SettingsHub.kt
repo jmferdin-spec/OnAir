@@ -944,14 +944,17 @@ private fun LivePage(ctx: Context) {
     Text("TV-Programm (EPG)", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
     Text("Programm bei $xtream von ${counts.first} Sendern möglich", color = Muted, fontSize = 15.sp)
     Text("XMLTV: ${Xmltv.status}", color = Accent2, fontSize = 15.sp)
+    // OnAir: the guide is stored on the device and renewed with the playlist (at most every 12 hours)
+    if (Xmltv.storedAt > 0) Text("Programm gespeichert: " + dayLabel(Xmltv.storedAt / 1000) + " " + hhmm(Xmltv.storedAt / 1000), color = Muted, fontSize = 14.sp)
     Hint("Die App sucht die Programmdaten automatisch (Xtream-Schnittstelle oder XMLTV-Adresse aus der Playlist). Wenn dein Anbieter eine eigene XMLTV-Adresse nennt, trage sie hier ein.")
     Field(url, { url = it }, "https://…/xmltv.php?username=…&password=…")
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         PillButton("Speichern & laden", light = true) {
             Xmltv.setCustom(ctx, url)
-            Xmltv.start(ctx, PlaylistStore.epgUrls, PlaylistStore.channels)
+            // AUTO: only the new address is downloaded; the provider's guide comes from the device
+            Xmltv.start(ctx, PlaylistStore.epgUrls, PlaylistStore.channels, RefreshLogic.Trigger.AUTO)
         }
-        PillButton("Neu laden") { Xmltv.start(ctx, PlaylistStore.epgUrls, PlaylistStore.channels) }
+        PillButton("Neu laden") { Xmltv.start(ctx, PlaylistStore.epgUrls, PlaylistStore.channels, RefreshLogic.Trigger.MANUAL) }
     }
     Spacer(Modifier.height(4.dp))
     Text("Favoriten: ${Library.favs.size} Sender · ${CatFavs.list.size} Kategorien", color = Color.White, fontSize = 17.sp)
@@ -980,7 +983,7 @@ private fun PlaylistPage(ctx: Context, onAdd: () -> Unit, reload: () -> Unit) {
             }
             if (!isActive) SmallPill("Aktivieren") {
                 PlaylistStore.activate(ctx, i)
-                scope.launch { PlaylistStore.load(ctx, pl.url, false) }
+                scope.launch { PlaylistStore.load(ctx, pl.url, false, true, trigger = RefreshLogic.Trigger.AUTO) }
             }
             SmallPill("Umbenennen") { editing = i; name = pl.name }
             SmallPill("Löschen") {
@@ -989,7 +992,7 @@ private fun PlaylistPage(ctx: Context, onAdd: () -> Unit, reload: () -> Unit) {
                 if (PlaylistStore.lists.isEmpty()) onAdd()
                 else if (wasActive) {
                     val u = PlaylistStore.lists[PlaylistStore.active].url
-                    scope.launch { PlaylistStore.load(ctx, u, false) }
+                    scope.launch { PlaylistStore.load(ctx, u, false, true, trigger = RefreshLogic.Trigger.AUTO) }
                 }
             }
         }
@@ -1004,10 +1007,12 @@ private fun PlaylistPage(ctx: Context, onAdd: () -> Unit, reload: () -> Unit) {
     }
     LanguageFilterSection(ctx)
     SectionTitle("Automatisch aktualisieren")
-    val modes = listOf("Bei jedem Start", "Alle paar Stunden", "Täglich", "Wöchentlich", "Nur von Hand")
-    SelectRow("Playlist aktualisieren", modes[General.refreshMode], modes, General.refreshMode) { General.setPlan(ctx, mode = it) }
+    // OnAir: no "at every start" (rate limits) – modes 1..4 only, shown without the old first entry
+    val modes = listOf("Alle paar Stunden", "Täglich", "Wöchentlich", "Nur von Hand")
+    val modeIdx = (General.refreshMode - 1).coerceIn(0, modes.lastIndex)
+    SelectRow("Playlist aktualisieren", modes[modeIdx], modes, modeIdx) { General.setPlan(ctx, mode = it + 1) }
     if (General.refreshMode == 1) {
-        val ivs = listOf(3, 6, 12, 24, 48)
+        val ivs = listOf(12, 24, 48)
         SelectRow("Abstand", "alle ${General.refreshInterval} Stunden", ivs.map { "alle $it Stunden" }, ivs.indexOf(General.refreshInterval).coerceAtLeast(0)) {
             General.setPlan(ctx, interval = ivs[it])
         }
@@ -1033,10 +1038,13 @@ private fun PlaylistPage(ctx: Context, onAdd: () -> Unit, reload: () -> Unit) {
         "Zuletzt aktualisiert: " + (if (General.lastRefresh > 0) dayLabel(General.lastRefresh / 1000) + " " + hhmm(General.lastRefresh / 1000) else "noch nie"),
         color = Muted, fontSize = 14.sp
     )
-    SettingsLogic.nextDue(General.plan(), General.lastRefresh, nowMs, General.zone())?.let {
-        Text("Nächste Aktualisierung: " + dayLabel(it / 1000) + " " + hhmm(it / 1000), color = Accent2, fontSize = 14.sp)
+    SettingsLogic.nextDue(General.plan(), General.lastRefresh, nowMs, General.zone())?.let { planned ->
+        // OnAir: never earlier than the rate-limit gate allows (12 h since the last success, back-off after errors)
+        val gate = PlaylistStore.savedUrl(ctx)?.let { RefreshGate.nextAllowedAt(ctx, RefreshGate.catalogKey(it), RefreshLogic.Trigger.SCHEDULED, true) } ?: 0L
+        val at = maxOf(planned, gate)
+        Text("Nächste Aktualisierung: " + dayLabel(at / 1000) + " " + hhmm(at / 1000), color = Accent2, fontSize = 14.sp)
     }
-    Hint("„Bei jedem Start“ lädt die Playlist bei jedem Öffnen der App. Die geplanten Varianten laufen auch im Hintergrund, solange das Gerät eingeschaltet und online ist, und holen verpasste Termine beim nächsten Start nach. „Nur von Hand“ nutzt immer den gespeicherten Stand; Neu laden geht jederzeit mit dem Knopf oben. Die Uhrzeit richtet sich nach deiner Zeitzone unter „Sprache & Region“.")
+    Hint("Playlist und TV-Programm werden auf dem Gerät gespeichert. Beim Öffnen der App wird nichts heruntergeladen; die Aktualisierung läuft im Hintergrund nach Plan, höchstens alle 12 Stunden, solange das Gerät eingeschaltet und online ist. Nach einem Fehler wartet die App immer länger, bevor sie es erneut versucht. „Nur von Hand“ nutzt immer den gespeicherten Stand; Neu laden geht jederzeit mit dem Knopf oben. Die Uhrzeit richtet sich nach deiner Zeitzone unter „Sprache & Region“.")
     Hint("Läuft gerade ein Film oder Sender, wartet die Aktualisierung, bis du fertig bist – so ruckelt nichts.")
     Hint("Zugangsdaten werden nur auf diesem Gerät gespeichert und hier nicht angezeigt. Es ist immer eine Playlist aktiv. Mit „Aktivieren“ wechselst du die Liste.")
 }
