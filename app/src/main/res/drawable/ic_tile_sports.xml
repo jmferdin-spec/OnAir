@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <!-- OnAir tile: Sports (ball) -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:strokeLineJoin="round" android:strokeLineCap="round" android:pathData="M24,24m-16,0a16,16 0,1 1,32 0a16,16 0,1 1,-32 0" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:strokeLineJoin="round" android:strokeLineCap="round" android:pathData="M8,24H40M13,12.5C19,18 19,30 13,35.5M35,12.5C29,18 29,30 35,35.5" />
+</vector>

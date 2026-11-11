@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <!-- OnAir tile: Movies (clapperboard) -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:strokeLineJoin="round" android:strokeLineCap="round" android:pathData="M8,21H40V38A2,2 0,0 1,38 40H10A2,2 0,0 1,8 38Z" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:strokeLineJoin="round" android:strokeLineCap="round" android:pathData="M7.5,14.5L38.5,8.5L40,14.5L9,20.5Z" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:strokeLineJoin="round" android:strokeLineCap="round" android:pathData="M17,13L20,18.6M26.5,11.2L29.5,16.8" />
+</vector>

@@ -79,6 +79,17 @@ Zugangsdaten werden nur auf diesem Gerät gespeichert und hier nicht angezeigt. 
 OnAir · Version ¦OnAir · Version ¦OnAir · Sürüm ¦OnAir · Verzija ¦OnAir · Verzija ¦OnAir · Verzija ¦OnAir · Versión ¦OnAir · Version ¦OnAir · Versione 
 OnAir ist ein Player und liefert selbst keine Inhalte. Nutze nur Quellen, für die du eine Berechtigung hast.¦OnAir is a player and provides no content itself. Only use sources you are authorized to use.¦OnAir bir oynatıcıdır ve kendisi içerik sağlamaz. Yalnızca kullanma yetkiniz olan kaynakları kullanın.¦OnAir je player i sam ne nudi sadržaj. Koristi samo izvore za koje imaš dozvolu.¦OnAir je player i sam ne nudi sadržaj. Koristi samo izvore za koje imaš dozvolu.¦OnAir je plejer i sam ne nudi sadržaj. Koristi samo izvore za koje imaš dozvolu.¦OnAir es un reproductor y no ofrece contenido propio. Usa solo fuentes para las que tengas autorización.¦OnAir est un lecteur et ne fournit aucun contenu. Utilise uniquement des sources pour lesquelles tu as une autorisation.¦OnAir è un lettore e non fornisce contenuti propri. Usa solo fonti per cui hai un'autorizzazione.
 Dieses Produkt verwendet die TMDB-API, wird aber nicht von TMDB unterstützt oder zertifiziert. Intro-Zeiten: TheIntroDB.¦This product uses the TMDB API but is not endorsed or certified by TMDB. Intro times: TheIntroDB.¦Bu ürün TMDB API'sini kullanır ancak TMDB tarafından onaylanmamış veya sertifikalandırılmamıştır. Giriş süreleri: TheIntroDB.¦Ovaj proizvod koristi TMDB API, ali ga TMDB ne podržava niti certificira. Vremena uvoda: TheIntroDB.¦Ovaj proizvod koristi TMDB API, ali ga TMDB ne podržava niti certificira. Vremena uvoda: TheIntroDB.¦Ovaj proizvod koristi TMDB API, ali ga TMDB ne podržava niti certificira. Vremena uvoda: TheIntroDB.¦Este producto usa la API de TMDB pero no está respaldado ni certificado por TMDB. Tiempos de intro: TheIntroDB.¦Ce produit utilise l'API TMDB mais n'est ni soutenu ni certifié par TMDB. Durées d'intro : TheIntroDB.¦Questo prodotto usa l'API TMDB ma non è sostenuto né certificato da TMDB. Tempi dell'intro: TheIntroDB.
+# OnAir: Phase 2 – home tiles, standalone guide, placeholders
+Sport¦Sports
+Shows¦Shows
+Events¦Events
+On Demand¦On Demand
+Kommt in Phase 4¦Coming in Phase 4
+Hier siehst du bald, was gerade läuft – mit Sender, Fortschritt und direkt zum Ansehen.¦Soon this shows what's on right now – with channel, progress and one-press Watch.
+TV-Guide öffnen¦Open TV guide
+Filme und Serien deines Anbieters findest du unter „On Demand“.¦Your provider's movies and series are under “On Demand”.
+OK: Sender ansehen¦OK: watch channel
+Zurück = Startseite¦Back = home
 # OnAir: rebrand
 OnAir basiert auf IPVIO Stream von Emrodev (github.com/Emrodev/IPVIO-Stream), ebenfalls GPL-3.0. Danke!¦OnAir is based on IPVIO Stream by Emrodev (github.com/Emrodev/IPVIO-Stream), also GPL-3.0. Thank you!
 # OnAir: provider rate-limit protection

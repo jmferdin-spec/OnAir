@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <!-- OnAir tile: Live TV -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:strokeLineJoin="round" android:strokeLineCap="round" android:pathData="M10,9H38A4,4 0,0 1,42 13V30A4,4 0,0 1,38 34H10A4,4 0,0 1,6 30V13A4,4 0,0 1,10 9Z" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:strokeLineJoin="round" android:strokeLineCap="round" android:pathData="M24,34V39M16,40H32" />
+</vector>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <!-- OnAir tile: Shows (episodes: stacked screens with play) -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:strokeLineJoin="round" android:strokeLineCap="round" android:pathData="M13,8H35" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:strokeLineJoin="round" android:strokeLineCap="round" android:pathData="M10,14H38A4,4 0,0 1,42 18V36A4,4 0,0 1,38 40H10A4,4 0,0 1,6 36V18A4,4 0,0 1,10 14Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M20.5,20.5L31,27L20.5,33.5Z" />
+</vector>

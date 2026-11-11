@@ -156,7 +156,9 @@ fun HomeScreen(
     tab: Int, onTab: (Int) -> Unit, states: List<LazyListState>,
     onOpen: (Item) -> Unit, onPlayNow: (Item) -> Unit,
     onResume: (Entry, Item) -> Unit, onBrowse: (BrowseReq) -> Unit,
-    onCategories: (CatReq) -> Unit, onAdd: () -> Unit
+    onCategories: (CatReq) -> Unit, onAdd: () -> Unit,
+    /** OnAir: set when this screen is opened from the OnAir home ("On Demand") – leaving it returns there instead of exiting. */
+    onExit: (() -> Unit)? = null
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -336,6 +338,7 @@ fun HomeScreen(
     // Zurück wieder auf die Startseite statt zu beenden).
     var lastBack by remember { mutableLongStateOf(0L) }
     fun exitApp() {
+        if (onExit != null) { onExit(); return }   // OnAir: back to the five-tile home
         val act = generateSequence<android.content.Context>(ctx) { (it as? android.content.ContextWrapper)?.baseContext }
             .filterIsInstance<android.app.Activity>().firstOrNull()
         act?.finishAffinity()
@@ -367,7 +370,8 @@ fun HomeScreen(
         }
     }
     BackHandler(enabled = inSidebar && tab != 0) { onTab(0) }
-    BackHandler(enabled = inSidebar && tab == 0 && General.confirmExit) {
+    BackHandler(enabled = inSidebar && tab == 0 && (General.confirmExit || onExit != null)) {
+        if (onExit != null) { onExit(); return@BackHandler }   // OnAir: no exit prompt, just back to the OnAir home
         val now = System.currentTimeMillis()
         if (now - lastBack < 2500) exitApp()
         else { lastBack = now; android.widget.Toast.makeText(ctx, Lang.tr("Noch einmal Zurück drücken zum Beenden"), android.widget.Toast.LENGTH_SHORT).show() }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.background
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
@@ -160,6 +161,7 @@ private fun AppContent() {
     // Beim letzten Mal mitten im Hinzufügen unterbrochen (Absturz, Stromausfall): der Hinzufügen-Bildschirm lädt automatisch weiter
     val resumeAdd = remember { PlaylistStore.pending(ctx)?.autoResume == true }
     var adding by remember { mutableStateOf(PlaylistStore.savedUrl(ctx) == null || resumeAdd) }
+    val onAirScope = rememberCoroutineScope()
     // Oberste Detailseite (Item oder PersonRef) plus Rückwärts-Stapel, damit Zurück Film → Person → Film nachvollzieht
     var top by remember { mutableStateOf<Any?>(null) }
     val trail = remember { mutableStateListOf<Any>() }
@@ -193,6 +195,7 @@ private fun AppContent() {
             top = null; trail.clear(); browse = null; cats = null
             if (changed) AppNav.focusTab = 0
             if (tab != 0) { tab = 0; CatMemory.reset() }
+            OnAirNav.home()   // OnAir: the five tiles are the start page
         }
     }
 
@@ -251,13 +254,25 @@ private fun AppContent() {
         playing = PlayReq(title, playUrl, item.id, item.kind == Kind.LIVE, startMs, tmdb, season, ep, alts, note)
     }
 
-    /** EPG (Seitenleiste/Kachel): zuletzt gesehenen Sender (sonst den ersten) starten und gleich den TV-Guide zeigen. */
+    /** EPG (Seitenleiste/Kachel). OnAir: opens the standalone TV guide instead of starting a stream first. */
     fun openEpg() {
-        val ch = History.ids.firstNotNullOfOrNull { id -> liveAll.firstOrNull { it.id == id } } ?: liveAll.firstOrNull() ?: return
         AppNav.focusTab = -1
-        ZapContext.list = liveAll; ZapContext.key = "ALL"
-        AppNav.openGuide = true
+        OnAirNav.openGuide(OnAirScreen.VOD)
+    }
+
+    /** OnAir: watch a channel picked in the standalone guide; its list becomes the zapping list (and the guide's list on return). */
+    fun watchFromGuide(ch: Item, src: List<Item>) {
+        ZapContext.list = src; ZapContext.key = OnAirNav.guideKey ?: "ALL"
+        OnAirNav.guideList = src
         start(ch, ch.title, ch.url)
+    }
+
+    /** OnAir: a past programme of a catch-up channel picked in the standalone guide. */
+    fun archiveFromGuide(ch: Item, e: EpgEntry) {
+        val url = Catchup.urlFor(ch, e)
+        if (url == null) { android.widget.Toast.makeText(ctx, Lang.tr("Nicht im Archiv verfügbar"), android.widget.Toast.LENGTH_SHORT).show(); return }
+        History.add(ctx, ch.id)
+        playing = PlayReq(e.title, url, ch.id, false, 0L, archive = ArchiveRef(ch.id, ch.title, e))
     }
 
     /** Bereich wechseln; „EPG“ ist kein eigener Bildschirm, sondern öffnet den TV-Guide im Player. */
@@ -378,6 +393,23 @@ private fun AppContent() {
                 onGoTab = { if (it != MenuLogic.EPG) cats = null; goTab(it) }
             ) }
             adding -> Box(Modifier.fillMaxSize().screenEnter()) { AddPlaylistScreen { adding = false } }
+            // OnAir (Phase 2): standalone TV guide, "coming in Phase 4" placeholder, five-tile home; IPVIO's home = On Demand
+            OnAirNav.screen == OnAirScreen.GUIDE -> Box(Modifier.fillMaxSize().screenEnter()) {
+                GuideScreen(liveAll, onWatch = { ch, src -> watchFromGuide(ch, src) }, onArchive = { ch, e -> archiveFromGuide(ch, e) }) { OnAirNav.back() }
+            }
+            OnAirNav.screen == OnAirScreen.SOON -> Box(Modifier.fillMaxSize().screenEnter()) {
+                PhasePlaceholder(OnAirNav.tile, onBack = { OnAirNav.back() }) { OnAirNav.openGuide(OnAirScreen.HOME) }
+            }
+            OnAirNav.screen == OnAirScreen.HOME -> Box(Modifier.fillMaxSize().screenEnter()) {
+                OnAirHomeScreen(
+                    liveCount = liveAll.size, focusTile = OnAirNav.tile,
+                    onTile = { OnAirNav.openTile(it) },
+                    onOnDemand = { goTab(MenuLogic.HOME); OnAirNav.openVod() },
+                    onSettings = { goTab(MenuLogic.SETTINGS); OnAirNav.openVod() },
+                    onAdd = { adding = true },
+                    onRetry = { PlaylistStore.savedUrl(ctx)?.let { u -> onAirScope.launch { PlaylistStore.load(ctx, u, false) } } }
+                )
+            }
             tab == 4 && all.isNotEmpty() -> Box(Modifier.fillMaxSize().screenEnter()) { SearchScreen(
                 tab = tab, state = states[4],
                 onOpen = open,
@@ -397,7 +429,8 @@ private fun AppContent() {
                 },
                 onBrowse = { browse = BrowseState(it) },
                 onCategories = { cats = it },
-                onAdd = { adding = true }
+                onAdd = { adding = true },
+                onExit = { OnAirNav.back() }   // OnAir: leaving IPVIO's home returns to the five tiles
             ) }
         }
         // Genre-Erkennung im Hintergrund: dezent oben rechts, nie im Player

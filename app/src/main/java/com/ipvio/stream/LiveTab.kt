@@ -121,8 +121,8 @@ fun LiveTab(live: List<Item>, groups: Map<String, List<Item>>, favs: List<Item>,
                         // TV-Guide wie im Entwurf: startet den zuletzt gesehenen (sonst ersten) Sender der Auswahl und öffnet den Guide
                         CatRow("TV-Guide", -1, false, Modifier, onFocus = {}, onRight = { runCatching { firstChan.requestFocus() } }, onFav = {}, icon = AIcon.Grid) {
                             val src = list.ifEmpty { live }
-                            val ch = History.ids.firstNotNullOfOrNull { id -> src.firstOrNull { it.id == id } } ?: src.firstOrNull()
-                            if (ch != null) { ZapContext.list = src; ZapContext.key = sel; AppNav.openGuide = true; onOpen(ch) }
+                            // OnAir: standalone guide on this category (no stream starts); Back returns to Live TV
+                            if (src.isNotEmpty()) { ZapContext.list = src; ZapContext.key = sel; OnAirNav.openGuide(OnAirScreen.VOD, src, sel) }
                         }
                         return@itemsIndexed
                     }
