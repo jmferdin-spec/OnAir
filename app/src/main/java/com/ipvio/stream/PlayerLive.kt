@@ -123,7 +123,11 @@ fun ChannelOverlay(
     val ls = rememberLazyListState()
     LaunchedEffect(chanCat) { ls.scrollToItem(maxOf(startIdx - 2, 0)) }
     val fc = focusedCh ?: curItem
-    val fe by produceState(emptyList<EpgEntry>(), fc?.id) { value = if (fc != null) EpgFull.get(fc) else emptyList() }
+    val fe by produceState(emptyList<EpgEntry>(), fc?.id) {
+        value = if (fc != null) EpgFull.get(fc) else emptyList()
+        // OnAir: provider only for a channel the focus rests on (no guide rows); moving on cancels this
+        if (fc != null && value.isEmpty() && !Xmltv.has(fc.tvgId)) { kotlinx.coroutines.delay(700); value = EpgFull.get(fc, network = true) }
+    }
     val panelShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)
 
     Row(Modifier.fillMaxSize()) {

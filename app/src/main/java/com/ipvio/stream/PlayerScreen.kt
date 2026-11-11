@@ -534,7 +534,7 @@ fun PlayerScreen(req: PlayReq, zapList: List<Item>, liveAll: List<Item>, seriesI
     LaunchedEffect(cur.archive?.chId) {
         archProg = emptyList()
         val ch = curItem
-        if (cur.archive != null && ch != null) archProg = EpgFull.get(ch)
+        if (cur.archive != null && ch != null) archProg = EpgFull.get(ch, network = true)
     }
     val archNow = System.currentTimeMillis() / 1000
     val archPrev = cur.archive?.let { a -> CatchupLogic.neighbour(archProg, a.prog.start, -1)?.takeIf { Catchup.canPlay(curItem, it, archNow) } }
@@ -850,7 +850,7 @@ fun PlayerScreen(req: PlayReq, zapList: List<Item>, liveAll: List<Item>, seriesI
         epg = emptyList()
         val it = curItem
         if (cur.live && it != null) {
-            while (true) { epg = Epg.now(it); delay(60_000) }
+            while (true) { epg = Epg.now(it, network = true); delay(60_000) }   // OnAir: the playing channel
         }
     }
     // Steuerleiste nach einstellbarer Zeit ohne Tastendruck ausblenden. Jeder Tastendruck startet die Zeit neu.

@@ -1,0 +1,369 @@
+package com.ipvio.stream
+
+import java.text.Normalizer
+
+/** OnAir: what kind of programme is on (first matching rule wins, see [OnNowLogic.classify]). */
+enum class OnNowClass { EVENT, SPORTS, MOVIE, SHOW, OTHER }
+
+/** OnAir: sport groups on the Sports screen (order = the order of the rules in [OnNowLogic.SPORT_RULES] is separate). */
+enum class Sport(val label: String) {
+    NFL("NFL"), COLLEGE_FOOTBALL("College Football"), NBA("NBA"), COLLEGE_BASKETBALL("College Basketball"),
+    MLB("MLB"), NHL("NHL"), SOCCER("Soccer"), COMBAT("Combat Sports"), GOLF("Golf"), TENNIS("Tennis"),
+    MOTORSPORTS("Motorsports"), OTHER("Other Sports")
+}
+
+/**
+ * One card on a "now" screen: a programme with all channels that carry it ([sources], best quality first).
+ * Identical programmes (same normalised title + same start) on several channels are merged into one item.
+ */
+data class OnNowItem(val cls: OnNowClass, val sport: Sport?, val prog: OnNowLogic.Prog, val sources: List<OnNowLogic.Chan>) {
+    val title: String get() = prog.title
+    fun progress(now: Long): Float = OnNowLogic.progress(prog.start, prog.stop, now)
+    fun elapsedMin(now: Long): Int = OnNowLogic.elapsedMin(prog.start, now)
+    fun remainingMin(now: Long): Int = OnNowLogic.remainingMin(prog.stop, now)
+}
+
+/**
+ * OnAir Phase 3: the shared "on now" logic behind Movies, Shows, Sports and Events (pure Kotlin, tested in OnNowLogicTest).
+ *
+ * Classification of an on-now programme, first match wins (CLAUDE.md, Phase 3):
+ * 1. placeholder title (empty, "To Be Announced", "Off Air" …) → excluded everywhere
+ * 2. **Event** – channel name or Xtream category matches PPV/event words
+ * 3. paid programming / infomercial / shopping → **Other** (also on sports channels)
+ * 4. **Sports** – EPG category says sport, the Xtream category is a sports group, or the title is a game ("A vs B") with a
+ *    sport keyword
+ * 5. news, weather, religious, music … → **Other** (never in Movies or Shows)
+ * 6. **Movie** – EPG category says movie/film, or a movie-channel group with no episode number and ≥ 70 minutes
+ * 7. **Show** – series-like EPG category, an episode number, or an entertainment / movie channel
+ * 8. **Other**
+ *
+ * All keyword tables below are plain data – tune them there (Phase 5), not in UI code. Matching is accent-, case- and
+ * punctuation-insensitive ([norm]); "word" lists match whole words, "part" lists match anywhere.
+ */
+object OnNowLogic {
+
+    // ================================================================== data
+
+    /** A programme as stored in the guide. [categories] = XMLTV `<category>` values, [episode] = normalised marker or null. */
+    data class Prog(
+        val tvgId: String, val title: String, val start: Long, val stop: Long,
+        val categories: List<String> = emptyList(), val episode: String? = null,
+        val subTitle: String? = null, val desc: String? = null
+    )
+
+    /** A live channel: [group] = Xtream category name, [catId] = Xtream category_id, [quality] = "4K"/"FHD"/"HD"/null. */
+    data class Chan(
+        val id: String, val name: String, val group: String, val catId: String? = null,
+        val quality: String? = null, val logo: String? = null, val tvgId: String? = null
+    )
+
+    // ================================================================== keyword tables (tune here)
+
+    /** Channel name or Xtream category → Event. */
+    val EVENT_WORDS = listOf(
+        "PPV", "PAY PER VIEW", "EVENT", "EVENTS", "UFC PPV", "BOXING PPV", "WWE PPV", "DAZN PPV",
+        "FLO", "FLOSPORTS", "FLO SPORTS", "EVENTO", "EVENTOS"
+    )
+
+    /** Title or EPG category → Other, checked before Sports (a sports channel's infomercial is not a game). */
+    val JUNK_WORDS = listOf(
+        "PAID PROGRAMMING", "PAID PROGRAM", "INFOMERCIAL", "SHOPPING", "TELESHOPPING", "TELEVENTA", "PROGRAMA PAGADO"
+    )
+
+    /** EPG category contains … → Sports. */
+    val SPORT_CATEGORY_PARTS = listOf("SPORT", "DEPORT")
+    /** EPG category is a sport name → Sports (XMLTV often says just "Football" or "Basketball"). */
+    val SPORT_CATEGORY_WORDS = listOf(
+        "FOOTBALL", "SOCCER", "BASKETBALL", "BASEBALL", "HOCKEY", "TENNIS", "GOLF", "BOXING", "MMA", "WRESTLING",
+        "MOTORSPORTS", "RACING", "FUTBOL", "BEISBOL", "BALONCESTO", "BOXEO", "LUCHA LIBRE"
+    )
+    /** Xtream category contains … → Sports. */
+    val SPORT_GROUP_PARTS = listOf("SPORT", "DEPORT", "FUTBOL")
+
+    /** Title shaped like a game: "A vs B", "A vs. B", "A v B", "A @ B", "A at B" (needs a sport keyword as well). */
+    val GAME_TITLE = Regex("""\S.*?\s(?:vs\.?|v\.?|@|at)\s+\S""", RegexOption.IGNORE_CASE)
+
+    /** EPG category / title / Xtream category → Other (news, weather, religion, music …). */
+    val OTHER_CATEGORY_WORDS = listOf(
+        "NEWS", "WEATHER", "SHOPPING", "PAID PROGRAMMING", "INFOMERCIAL", "RELIGIOUS", "RELIGION", "MUSIC", "CONSUMER",
+        "PUBLIC AFFAIRS", "NOTICIAS", "NOTICIERO", "CLIMA", "RELIGIOSO", "MUSICA"
+    )
+    val OTHER_TITLE_WORDS = listOf(
+        "NEWS", "NOTICIAS", "NOTICIERO", "TELEDIARIO", "WEATHER", "EL TIEMPO", "MUSIC VIDEOS", "VIDEOS MUSICALES", "MISA"
+    )
+    val OTHER_GROUP_WORDS = listOf(
+        "NEWS", "NOTICIAS", "RELIGION", "RELIGIOUS", "RELIGIOSO", "RELIGIOSOS", "FAITH", "MUSIC", "MUSICA", "SHOPPING", "WEATHER"
+    )
+
+    /** EPG category contains … → Movie. */
+    val MOVIE_CATEGORY_PARTS = listOf("MOVIE", "FILM", "PELICULA", "CINE")
+    /** Xtream category contains … → movie channel. */
+    val MOVIE_GROUP_PARTS = listOf("MOVIE", "CINEMA", "HBO", "SHOWTIME", "STARZ", "CINEMAX", "MGM", "TCM", "PELICULA", "CINE")
+    /** On a movie channel without episode number, this long counts as a film (supporting signal, never alone). */
+    const val MOVIE_MIN_MINUTES = 70
+
+    /** EPG category contains … → Show. */
+    val SHOW_CATEGORY_PARTS = listOf(
+        "SERIES", "SERIE", "EPISODE", "DRAMA", "COMEDY", "COMEDIA", "REALITY", "DOCUMENTAR", "DOCUMENTAL", "ANIMATION",
+        "ANIMACION", "ANIMATED", "CARTOON", "ANIME", "SITCOM", "SOAP", "TELENOVELA", "TALK", "GAME SHOW", "CHILDREN", "KIDS",
+        "INFANTIL", "FAMILY", "CRIME", "MYSTERY", "THRILLER", "SCI FI", "FANTASY", "ROMANCE", "ADVENTURE", "HORROR",
+        "ENTERTAINMENT", "ENTRETENIMIENTO", "LIFESTYLE", "COOKING", "TRAVEL", "HISTORY", "NATURE", "SCIENCE", "VARIETY"
+    )
+    /** Xtream category contains … → entertainment channel (programmes not matched above count as shows). */
+    val ENTERTAINMENT_GROUP_PARTS = listOf(
+        "ENTERTAINMENT", "ENTRETENIMIENTO", "NETWORK", "GENERAL", "DOCUMENTAR", "DOCUMENTAL", "KIDS", "INFANTIL", "FAMILY",
+        "FAMILIA", "LIFESTYLE", "REALITY", "COMEDY", "DRAMA", "VARIETY", "VARIEDADES", "SERIES"
+    )
+    /** Xtream category is (also) one of these whole words → general/entertainment channel. */
+    val ENTERTAINMENT_GROUP_WORDS = listOf("US", "USA", "UK", "CANADA", "LATINO", "LATIN", "MEXICO", "ESPANA", "SPAIN", "LOCALS", "LOCAL")
+
+    /** Titles that are no programme at all – excluded from every list. Compared after [norm]. */
+    val PLACEHOLDER_TITLES = listOf(
+        "TBA", "TBD", "TO BE ANNOUNCED", "TO BE DETERMINED", "NO INFORMATION", "NO INFORMATION AVAILABLE", "NO INFO",
+        "NO PROGRAMME INFORMATION", "NO PROGRAM INFORMATION", "NO PROGRAM INFO", "NO DATA", "NO EPG", "NO EPG AVAILABLE",
+        "OFF AIR", "SIGN OFF", "CLOSEDOWN", "N A", "NA", "UNKNOWN", "SIN INFORMACION", "POR CONFIRMAR",
+        "PROGRAMACION POR CONFIRMAR", "PROGRAMA POR CONFIRMAR", "INFORMACION NO DISPONIBLE", "FUERA DEL AIRE",
+        // PPV channels between events
+        "NO EVENT", "NO EVENTS", "NO EVENT SCHEDULED", "NO EVENTS SCHEDULED", "NO EVENT TODAY", "NO LIVE EVENT", "SIN EVENTO", "SIN EVENTOS"
+    )
+
+    /** One sport rule: any keyword (whole words), and – if given – one of the [context] words somewhere in the texts. */
+    class SportRule(val sport: Sport, keywords: List<String>, context: List<String> = emptyList()) {
+        internal val words = keywords.map { pad(norm(it)) }
+        internal val ctx = context.map { pad(norm(it)) }
+        internal fun matches(text: String, all: String): Boolean = words.any { text.contains(it) } && (ctx.isEmpty() || ctx.any { all.contains(it) })
+    }
+
+    /**
+     * Sport groups, checked in this order on the title, then the EPG categories, then the channel name, then the Xtream
+     * category; first match wins, nothing → [Sport.OTHER]. More specific rules come first (college before pro,
+     * "Fútbol americano" before soccer's "Fútbol").
+     */
+    val SPORT_RULES = listOf(
+        SportRule(Sport.COLLEGE_FOOTBALL, listOf("NCAAF", "COLLEGE FOOTBALL", "CFB", "NCAA FOOTBALL", "FUTBOL AMERICANO UNIVERSITARIO")),
+        SportRule(Sport.COLLEGE_FOOTBALL, listOf("SEC", "BIG TEN", "BIG 12", "ACC", "PAC 12"), context = listOf("FOOTBALL", "FUTBOL AMERICANO")),
+        SportRule(Sport.NFL, listOf(
+            "NFL", "FOOTBALL NIGHT", "THURSDAY NIGHT FOOTBALL", "SUNDAY NIGHT FOOTBALL", "MONDAY NIGHT FOOTBALL",
+            "NFL REDZONE", "REDZONE", "FUTBOL AMERICANO"
+        )),
+        SportRule(Sport.COLLEGE_BASKETBALL, listOf("NCAAB", "COLLEGE BASKETBALL", "NCAAM", "NCAAW", "MARCH MADNESS")),
+        SportRule(Sport.NBA, listOf("NBA")),
+        SportRule(Sport.MLB, listOf("MLB", "BASEBALL", "BEISBOL")),
+        SportRule(Sport.NHL, listOf("NHL", "HOCKEY")),
+        SportRule(Sport.SOCCER, listOf(
+            "SOCCER", "FUTBOL", "LIGA MX", "MLS", "PREMIER LEAGUE", "EPL", "LA LIGA", "LALIGA", "SERIE A", "BUNDESLIGA",
+            "LIGUE 1", "CHAMPIONS LEAGUE", "UEFA", "COPA"
+        )),
+        SportRule(Sport.COMBAT, listOf("UFC", "MMA", "BOXING", "BOXEO", "BELLATOR", "PFL", "WWE", "AEW", "WRESTLING", "LUCHA LIBRE")),
+        SportRule(Sport.GOLF, listOf("GOLF", "PGA", "LPGA")),
+        SportRule(Sport.GOLF, listOf("LIV"), context = listOf("GOLF")),   // "LIV" alone is also a Roman numeral
+        SportRule(Sport.TENNIS, listOf("TENNIS", "TENIS", "ATP", "WTA")),
+        SportRule(Sport.TENNIS, listOf("OPEN"), context = listOf("TENNIS", "TENIS", "ATP", "WTA")),
+        SportRule(Sport.MOTORSPORTS, listOf("NASCAR", "F1", "FORMULA 1", "FORMULA ONE", "FORMULA UNO", "INDYCAR", "MOTOGP", "RACING"))
+    )
+
+    // ================================================================== text helpers
+
+    /**
+     * Text for matching: accents removed, upper case, every run of non-letters/digits → one space, trimmed.
+     * "Fútbol: América vs. Chivas!" → "FUTBOL AMERICA VS CHIVAS". Letters of other scripts are kept.
+     */
+    fun norm(s: String?): String {
+        if (s.isNullOrEmpty()) return ""
+        val d = Normalizer.normalize(s, Normalizer.Form.NFD)
+        val sb = StringBuilder(d.length)
+        var space = true
+        for (ch in d) {
+            if (Character.getType(ch) == Character.NON_SPACING_MARK.toInt()) continue
+            if (Character.isLetterOrDigit(ch)) { sb.append(ch.uppercaseChar()); space = false }
+            else if (!space) { sb.append(' '); space = true }
+        }
+        return sb.toString().trimEnd()
+    }
+
+    private fun pad(n: String) = " $n "
+    private fun words(raw: List<String>) = raw.map { pad(norm(it)) }
+    private fun parts(raw: List<String>) = raw.map { norm(it) }
+
+    private val eventW = words(EVENT_WORDS)
+    private val junkW = words(JUNK_WORDS)
+    private val sportCatP = parts(SPORT_CATEGORY_PARTS)
+    private val sportCatW = words(SPORT_CATEGORY_WORDS)
+    private val sportGroupP = parts(SPORT_GROUP_PARTS)
+    private val otherCatW = words(OTHER_CATEGORY_WORDS)
+    private val otherTitleW = words(OTHER_TITLE_WORDS)
+    private val otherGroupW = words(OTHER_GROUP_WORDS)
+    private val movieCatP = parts(MOVIE_CATEGORY_PARTS)
+    private val movieGroupP = parts(MOVIE_GROUP_PARTS)
+    private val showCatP = parts(SHOW_CATEGORY_PARTS)
+    private val entGroupP = parts(ENTERTAINMENT_GROUP_PARTS)
+    private val entGroupW = words(ENTERTAINMENT_GROUP_WORDS)
+    private val placeholders = PLACEHOLDER_TITLES.map { norm(it) }.toHashSet()
+
+    private fun anyWord(text: String, list: List<String>) = list.any { text.contains(it) }
+    private fun anyPart(text: String, list: List<String>) = list.any { text.contains(it) }
+
+    /** Empty or placeholder title ("To Be Announced", "No information", "Off Air" …). */
+    fun isPlaceholder(title: String?): Boolean {
+        if (title.isNullOrBlank()) return true
+        val n = norm(title)
+        return n.isEmpty() || n in placeholders
+    }
+
+    // ================================================================== on-now window and progress
+
+    /** On now: start ≤ now < stop. */
+    fun isOnNow(start: Long, stop: Long, now: Long): Boolean = start <= now && now < stop
+
+    /** (now − start) / (stop − start), clamped to 0..1 (0 for a broken programme). */
+    fun progress(start: Long, stop: Long, now: Long): Float =
+        if (stop <= start) 0f else ((now - start).toDouble() / (stop - start)).coerceIn(0.0, 1.0).toFloat()
+
+    /** Whole minutes since the start (never negative). */
+    fun elapsedMin(start: Long, now: Long): Int = ((now - start).coerceAtLeast(0) / 60).toInt()
+
+    /** Minutes left, rounded up (59 s left = 1 min; never negative). */
+    fun remainingMin(stop: Long, now: Long): Int = (((stop - now).coerceAtLeast(0) + 59) / 60).toInt()
+
+    // ================================================================== classification
+
+    /** Pre-normalised texts of one programme on one channel (padded with spaces for whole-word matching). */
+    class Facts(val prog: Prog, chan: Chan) {
+        val title = pad(norm(prog.title))
+        val cats = pad(prog.categories.joinToString(" ") { norm(it) })
+        val name = pad(norm(chan.name))
+        val group = pad(norm(chan.group))
+        val all = title + cats + name + group
+        val minutes = ((prog.stop - prog.start) / 60).toInt()
+    }
+
+    private fun hasSportKeyword(f: Facts): Boolean =
+        anyWord(f.all, sportCatW) || SPORT_RULES.any { r -> r.words.any { f.all.contains(it) } && (r.ctx.isEmpty() || r.ctx.any { f.all.contains(it) }) }
+
+    private fun isSports(f: Facts): Boolean =
+        anyPart(f.cats, sportCatP) || anyWord(f.cats, sportCatW) || anyPart(f.group, sportGroupP) ||
+            (GAME_TITLE.containsMatchIn(f.prog.title) && hasSportKeyword(f))
+
+    /** Class of [prog] on [chan]; null = placeholder title (shown nowhere). */
+    fun classify(prog: Prog, chan: Chan): OnNowClass? = if (isPlaceholder(prog.title)) null else classify(Facts(prog, chan))
+
+    fun classify(f: Facts): OnNowClass {
+        val p = f.prog
+        if (anyWord(f.name, eventW) || anyWord(f.group, eventW)) return OnNowClass.EVENT
+        if (anyWord(f.title, junkW) || anyWord(f.cats, junkW)) return OnNowClass.OTHER
+        if (isSports(f)) return OnNowClass.SPORTS
+        if (anyWord(f.cats, otherCatW) || anyWord(f.title, otherTitleW) || anyWord(f.group, otherGroupW)) return OnNowClass.OTHER
+        if (anyPart(f.cats, movieCatP)) return OnNowClass.MOVIE
+        val movieGroup = anyPart(f.group, movieGroupP)
+        val showCat = anyPart(f.cats, showCatP)
+        if (movieGroup && p.episode == null && !showCat && f.minutes >= MOVIE_MIN_MINUTES) return OnNowClass.MOVIE
+        if (showCat || p.episode != null || movieGroup || anyPart(f.group, entGroupP) || anyWord(f.group, entGroupW)) return OnNowClass.SHOW
+        return OnNowClass.OTHER
+    }
+
+    /** Sport group of a Sports item: title, then EPG categories, then channel name, then Xtream category. */
+    fun sportOf(f: Facts): Sport {
+        for (text in listOf(f.title, f.cats, f.name, f.group)) for (r in SPORT_RULES) if (r.matches(text, f.all)) return r.sport
+        return Sport.OTHER
+    }
+
+    fun sportOf(prog: Prog, chan: Chan): Sport = sportOf(Facts(prog, chan))
+
+    // ================================================================== merging
+
+    /** 4K > FHD > HD > anything else. */
+    fun qualityRank(q: String?): Int = when (q?.uppercase()) { "4K", "UHD" -> 4; "FHD" -> 3; "HD" -> 2; else -> 1 }
+
+    /** Sources best first: highest quality, then name. */
+    val SOURCE_ORDER: Comparator<Chan> = compareByDescending<Chan> { qualityRank(it.quality) }.thenBy { it.name.lowercase() }
+
+    /** Same programme on several channels: same normalised title and same start. */
+    fun mergeKey(p: Prog): String = (norm(p.title).ifEmpty { p.title.trim().lowercase() }) + "\u0001" + p.start
+
+    /**
+     * Everything on now as cards: placeholders dropped, each programme classified on each of its channels, identical
+     * programmes merged (the strongest class wins: Event > Sports > Movie > Show > Other), sources best quality first.
+     * [chansByTvg] = live channels by lower-case tvg-id. Sorted by start, most recently started first.
+     * [include] picks the programmes (default: on now); [upcoming] uses it for "coming up".
+     */
+    fun build(
+        progs: List<Prog>, chansByTvg: Map<String, List<Chan>>, now: Long,
+        include: (Prog) -> Boolean = { isOnNow(it.start, it.stop, now) }
+    ): List<OnNowItem> {
+        class Acc(var cls: OnNowClass, var best: Facts, val sources: LinkedHashMap<String, Chan>)
+        val acc = LinkedHashMap<String, Acc>()
+        for (p in progs) {
+            if (!include(p) || isPlaceholder(p.title)) continue
+            val chans = chansByTvg[p.tvgId.lowercase()] ?: continue
+            val key = mergeKey(p)
+            for (ch in chans) {
+                val f = Facts(p, ch)
+                val c = classify(f)
+                val a = acc[key]
+                if (a == null) acc[key] = Acc(c, f, linkedMapOf(ch.id to ch))
+                else {
+                    a.sources[ch.id] = ch
+                    if (c.ordinal < a.cls.ordinal) { a.cls = c; a.best = f }
+                }
+            }
+        }
+        return acc.values.map { a ->
+            OnNowItem(a.cls, if (a.cls == OnNowClass.SPORTS) sportOf(a.best) else null, a.best.prog, a.sources.values.sortedWith(SOURCE_ORDER))
+        }.sortedWith(compareByDescending<OnNowItem> { it.prog.start }.thenBy { it.title.lowercase() })
+    }
+
+    /** Programmes starting in [now, now + [hours]) as cards, soonest first (Events "Coming up", Sports "Starting soon"). */
+    fun upcoming(progs: List<Prog>, chansByTvg: Map<String, List<Chan>>, now: Long, hours: Int = 24): List<OnNowItem> =
+        build(progs, chansByTvg, now) { it.start >= now && it.start < now + hours * 3600L }
+            .sortedWith(compareBy<OnNowItem> { it.prog.start }.thenBy { it.title.lowercase() })
+
+    // ================================================================== events
+
+    /** PPV / event channel by its name or Xtream category (rule 1 of [classify]). */
+    fun isEventChannel(chan: Chan): Boolean = anyWord(pad(norm(chan.name)), eventW) || anyWord(pad(norm(chan.group)), eventW)
+
+    private val RUNS = Regex("""\d+|\D+""")
+
+    /** "PPV 2" before "PPV 10": compares runs of digits as numbers. */
+    val NATURAL: Comparator<String> = Comparator { a, b ->
+        val ra = RUNS.findAll(a.lowercase()).map { it.value }.toList()
+        val rb = RUNS.findAll(b.lowercase()).map { it.value }.toList()
+        for (i in 0 until minOf(ra.size, rb.size)) {
+            val x = ra[i]; val y = rb[i]
+            val c = if (x[0].isDigit() && y[0].isDigit()) (x.toBigInteger().compareTo(y.toBigInteger())).let { if (it != 0) it else x.length - y.length }
+            else x.compareTo(y)
+            if (c != 0) return@Comparator c
+        }
+        ra.size - rb.size
+    }
+
+    /** The Events screen: live now, coming up (next 24 h), and PPV channels with nothing listed. */
+    class Events(val live: List<OnNowItem>, val upcoming: List<OnNowItem>, val channels: List<Chan>)
+
+    /**
+     * Events from all live channels: event programmes on now and starting within 24 h, plus every PPV/event channel that
+     * has neither – no guide rows at all, or only placeholders ("No Event Scheduled"). Those are listed under
+     * "PPV channels" with the channel name as their title ([eventTitle]) so they stay reachable.
+     */
+    fun events(onNow: List<OnNowItem>, upcomingProgs: List<Prog>, allChans: List<Chan>, now: Long): Events {
+        val eventChans = allChans.filter { isEventChannel(it) }
+        val byTvg = HashMap<String, MutableList<Chan>>()
+        for (c in eventChans) { val k = c.tvgId?.trim()?.lowercase()?.ifEmpty { null } ?: continue; byTvg.getOrPut(k) { ArrayList(2) }.add(c) }
+        val live = onNow.filter { it.cls == OnNowClass.EVENT }
+        val next = upcoming(upcomingProgs, byTvg, now).filter { it.cls == OnNowClass.EVENT }
+        val listed = HashSet<String>()
+        for (i in live + next) for (s in i.sources) listed.add(s.id)
+        val rest = eventChans.filter { it.id !in listed }.sortedWith(compareBy(NATURAL) { it.name })
+        return Events(live, next, rest)
+    }
+
+    /** Title of a PPV channel without guide data: its name. */
+    fun eventTitle(chan: Chan): String = chan.name.trim()
+
+    fun countByClass(items: List<OnNowItem>): Map<OnNowClass, Int> =
+        OnNowClass.entries.associateWith { c -> items.count { it.cls == c } }
+
+    /** Sport groups that have games now, with counts, in [Sport] order. */
+    fun countBySport(items: List<OnNowItem>): Map<Sport, Int> =
+        Sport.entries.associateWith { s -> items.count { it.cls == OnNowClass.SPORTS && it.sport == s } }.filterValues { it > 0 }
+}

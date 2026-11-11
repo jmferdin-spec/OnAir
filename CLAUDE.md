@@ -41,6 +41,9 @@ These override anything below that says otherwise.
 - **Per-channel EPG calls:** once the guide is in SQLite, `get_simple_data_table` / `get_short_epg` are only called on demand for the one focused channel that has no XMLTV rows. No bulk prefetch (the guide currently prefetches up to 80 channels — remove that).
 - **Standalone TV guide screen** (no video preview in v1). Picking a programme starts the player; Back from the player returns to the guide. The in-player guide stays as it is.
 
+- **What the owner's XMLTV actually contains** (measured 2026-11-11 on the stored file: 29,131 programmes, 2,875 channels): **0 % `<category>`, 0 % `<episode-num>`, 0 % `<sub-title>`** – only title and description. All times carry `-0500` and are converted correctly (checked against known air times). So classification relies on **titles + Xtream category name + channel name** (plus duration); the EPG-category and episode rules stay in `OnNowLogic` for providers that send them but don't fire here. Tune keyword/title tables for that (Phase 5); the debug screen shows the field coverage.
+- **Guide coverage:** only ~1,257 of ~9,400 live channels carry a tvg-id (epg_channel_id) and ~680 match the XMLTV. Channels without guide rows can't appear in Movies/Shows/Sports; PPV/event channels are still listed under Events → "PPV channels" with their channel name.
+
 ### Phase order
 
 0. Understand (done) · 1. Rebrand · **2. Five-tile home + standalone TV guide screen** · **3. Guide → SQLite first (parser keeps categories, episode numbers, sub-titles), then the "on now" logic** · 4. The four "now" screens · 5. Tuning.

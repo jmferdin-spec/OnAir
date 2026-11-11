@@ -67,7 +67,7 @@ fun LiveBackdrop(ch: Item?, modifier: Modifier = Modifier) {
 fun LiveNowPanel(ch: Item?, modifier: Modifier = Modifier) {
     if (ch == null) return
     Crossfade(ch, animationSpec = tween(if (Look.motion == 0) 0 else 400), label = "liveNow", modifier = modifier) { c ->
-        val epg by produceState(emptyList<EpgEntry>(), c.id) { value = Epg.now(c) }
+        val epg by produceState(emptyList<EpgEntry>(), c.id) { value = Epg.now(c, network = true) }   // OnAir: focused channel only
         val nowE = Epg.current(epg)
         val next = if (nowE != null) epg.filter { it.start >= nowE.end }.take(2) else epg.take(2)
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(dpx(18))) {

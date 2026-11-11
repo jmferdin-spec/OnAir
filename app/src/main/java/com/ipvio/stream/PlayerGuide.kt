@@ -144,13 +144,8 @@ fun Guide(
     val idx = shown.indexOfFirst { it.id == curId }.coerceAtLeast(0)
     val ls = key(catIdx) { rememberLazyListState(maxOf(idx - 1, 0)) }
 
-    // Programmdaten vorab laden: zuerst die Sender rund um den aktuellen, 8 gleichzeitig
-    LaunchedEffect(shown) {
-        val order = shown.indices.sortedBy { kotlin.math.abs(it - idx) }.map { shown[it] }
-        for (chunk in order.take(80).chunked(8)) {
-            coroutineScope { chunk.map { async { EpgFull.get(it) } }.awaitAll() }
-        }
-    }
+    // OnAir Phase 3: no bulk prefetch any more – rows read the guide database; the provider is asked only for a focused
+    // channel without guide rows (see GuideRow)
 
     fun shiftFor(e: EpgEntry) {
         val center = e.start + minOf(e.end - e.start, viewMin * 60L) / 2
@@ -466,7 +461,16 @@ private fun GuideRow(
     val ctx = LocalContext.current
     val cu = remember(ch.id, Catchup.version) { Catchup.of(ch) }
     // null = wird noch geladen (zeigt "lädt …" statt fälschlich "Kein Programm verfügbar")
-    val raw by produceState<List<EpgEntry>?>(null, ch.id) { value = EpgFull.get(ch) }
+    // OnAir Phase 3: from the guide database; only when the focus rests on this channel (0.7 s) and it has no guide rows is
+    // the provider asked – leaving the row cancels that
+    var rowFocused by remember(ch.id) { mutableStateOf(false) }
+    val raw by produceState<List<EpgEntry>?>(null, ch.id, rowFocused) {
+        value = EpgFull.get(ch)
+        if (rowFocused && value.isNullOrEmpty() && !Xmltv.has(ch.tvgId)) {
+            kotlinx.coroutines.delay(700)
+            value = EpgFull.get(ch, network = true)
+        }
+    }
     // „Vergangene ausblenden“ lässt Sendungen im Archiv stehen: die kann man noch ansehen
     val entries = remember(raw, hidePast, cu) {
         cleanEpg(raw.orEmpty()).let { l -> if (hidePast) l.filter { it.end > nowSec || CatchupLogic.canPlay(cu, it.start, it.end, nowSec) } else l }
@@ -483,6 +487,7 @@ private fun GuideRow(
                 .border(if (f) DS.Border else 1.dp, if (f) Accent1 else Color(0x0FFFFFFF), shape)
                 .onFocusChanged {
                     f = it.isFocused
+                    rowFocused = it.isFocused
                     if (it.isFocused) {
                         onBlock(false, cellReq)
                         val now = Epg.current(entries)

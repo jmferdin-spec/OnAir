@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -1138,7 +1139,17 @@ private fun ApiKeysPage(ctx: Context) {
 
 @Composable
 private fun AboutPage(ctx: Context) {
-    Text("OnAir · Version " + appVersion(ctx), color = Color.White, fontSize = 18.sp)
+    // OnAir: long-press OK on the version opens the hidden debug screen (guide and classification counts)
+    var versionFocused by remember { mutableStateOf(false) }
+    Box(
+        Modifier.clip(RoundedCornerShape(DS.RadiusS)).background(if (versionFocused) RowFocus else Color.Transparent)
+            .onFocusChanged { versionFocused = it.isFocused }
+            .favKeys { OnAirNav.openDebug() }
+            .focusable()
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Text("OnAir · Version " + appVersion(ctx), color = Color.White, fontSize = 18.sp)
+    }
     Hint("OnAir ist ein Player und liefert selbst keine Inhalte. Nutze nur Quellen, für die du eine Berechtigung hast.")
     // OnAir: upstream credit (CLAUDE.md ground rule)
     Hint("OnAir basiert auf IPVIO Stream von Emrodev (github.com/Emrodev/IPVIO-Stream), ebenfalls GPL-3.0. Danke!")

@@ -54,5 +54,6 @@ class OnAirHomeLogicTest {
         assertEquals(OnAirScreen.HOME, OnAirHomeLogic.backFrom(OnAirScreen.SOON, OnAirScreen.HOME))
         assertEquals(OnAirScreen.HOME, OnAirHomeLogic.backFrom(OnAirScreen.VOD, OnAirScreen.HOME))
         assertEquals(OnAirScreen.HOME, OnAirHomeLogic.backFrom(OnAirScreen.HOME, OnAirScreen.HOME))
+        assertEquals(OnAirScreen.VOD, OnAirHomeLogic.backFrom(OnAirScreen.DEBUG, OnAirScreen.VOD))   // debug screen → Settings
     }
 }

@@ -17,7 +17,9 @@ enum class OnAirScreen {
     /** "Coming in Phase 4" placeholder for Movies, Shows, Sports and Events. */
     SOON,
     /** IPVIO's own home with sidebar (Movies/Series browsing, search, settings) – reached via "On Demand". */
-    VOD
+    VOD,
+    /** Hidden debug screen (Settings → About → long-press the version number). */
+    DEBUG
 }
 
 object OnAirHomeLogic {
@@ -56,6 +58,7 @@ object OnAirHomeLogic {
     /** Back from the guide or the placeholder: to the screen it was opened from (IPVIO's Live TV keeps its place). */
     fun backFrom(screen: OnAirScreen, openedFrom: OnAirScreen): OnAirScreen = when (screen) {
         OnAirScreen.GUIDE, OnAirScreen.SOON -> if (openedFrom == OnAirScreen.VOD) OnAirScreen.VOD else OnAirScreen.HOME
+        OnAirScreen.DEBUG -> OnAirScreen.VOD
         OnAirScreen.VOD -> OnAirScreen.HOME
         OnAirScreen.HOME -> OnAirScreen.HOME
     }

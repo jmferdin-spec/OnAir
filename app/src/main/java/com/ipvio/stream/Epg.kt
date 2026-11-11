@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Base64
 import android.util.Xml
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -87,7 +88,16 @@ object Xmltv {
     /** OnAir: when the newest stored guide was downloaded (0 = none), for the settings screen. */
     var storedAt by mutableLongStateOf(0L)
         private set
-    private val progs = ConcurrentHashMap<String, List<EpgEntry>>()
+    /** OnAir Phase 3: when the guide database was last filled (ms, 0 = never) and how many programmes it holds. */
+    var importedAt by mutableLongStateOf(0L)
+        private set
+    var rowCount by mutableIntStateOf(0)
+        private set
+    /** OnAir Phase 3: tvg-ids (lower case) that have programmes in [GuideDb] – small, kept in memory for [has]. */
+    @Volatile private var ids: Set<String> = emptySet()
+    /** Recently read channels (the guide scrolls back and forth); cleared whenever the database changes. */
+    private val recent = LruCache<String, List<EpgEntry>>(300)
+    @Volatile private var appCtx: Context? = null
     private val client = ProviderGuard.client(Net.withTimeouts(20, 180))
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
@@ -110,6 +120,7 @@ object Xmltv {
 
     fun deleteAll(c: Context) {
         runCatching { c.filesDir.listFiles { f -> f.name.startsWith("epg_") }?.forEach { it.delete() } }
+        clearDb(c)   // OnAir Phase 3: the guide database too
     }
 
     /** Stored guides of addresses no longer in use (other account, changed custom address) – deleted after 3 days. */
@@ -220,8 +231,37 @@ object Xmltv {
     fun customUrl(c: Context): String = prefs(c).getString("custom", "") ?: ""
     fun setCustom(c: Context, u: String) { prefs(c).edit().putString("custom", u.trim()).apply() }
 
-    fun has(id: String?): Boolean = id != null && progs.containsKey(id.lowercase())
-    fun forChannel(id: String?): List<EpgEntry> = if (id == null) emptyList() else progs[id.lowercase()] ?: emptyList()
+    /** Does the guide have programmes for this tvg-id? (memory only, safe on the main thread) */
+    fun has(id: String?): Boolean = id != null && id.trim().lowercase() in ids
+
+    /**
+     * Programmes of one channel, by start time, from [GuideDb]. Blocking database read – call from a background thread
+     * (Epg.now / EpgFull.get do). Channels without guide data return at once without touching the database.
+     */
+    fun forChannel(id: String?): List<EpgEntry> {
+        val k = id?.trim()?.lowercase() ?: return emptyList()
+        if (k !in ids) return emptyList()
+        recent[k]?.let { return it }
+        val c = appCtx ?: return emptyList()
+        return runCatching { GuideDb.forChannel(c, k) }.getOrElse { emptyList() }.also { recent[k] = it }
+    }
+
+    /** Re-reads the in-memory view of the database (channel set, counts) after an import or prune. */
+    private fun refreshView(c: Context) {
+        ids = runCatching { GuideDb.channelIds(c) }.getOrElse { emptySet() }
+        recent.clear()
+        val i = runCatching { GuideDb.info(c) }.getOrNull()
+        importedAt = i?.importedAt ?: 0L
+        rowCount = i?.rows ?: 0
+        channelCount = ids.size
+    }
+
+    /** Everything removed (all playlists deleted). */
+    fun clearDb(c: Context) {
+        job?.cancel()
+        GuideDb.clear(c)
+        ids = emptySet(); recent.clear(); importedAt = 0L; rowCount = 0; channelCount = 0
+    }
 
     /**
      * Lädt das XMLTV-Programm für die sichtbaren Sender (ausgeblendete Sprachen kommen gar nicht erst an).
@@ -233,90 +273,115 @@ object Xmltv {
      */
     fun start(c: Context, urls: List<String>, items: List<Item>, trigger: RefreshLogic.Trigger = RefreshLogic.Trigger.AUTO) {
         val app = c.applicationContext
+        appCtx = app
         val all = allUrls(app, urls)
         if (all.isEmpty()) { status = "Keine EPG-Adresse gefunden"; return }
-        val wanted = items.filter { it.kind == Kind.LIVE }.mapNotNull { it.tvgId?.lowercase() }.toSet()
+        val wanted = items.filter { it.kind == Kind.LIVE }.mapNotNull { it.tvgId?.trim()?.lowercase()?.ifEmpty { null } }.toSet()
         if (wanted.isEmpty()) { status = "Playlist enthält keine Sender-IDs (tvg-id)"; return }
+        // Sender mit Archiv (Catchup): auch vergangene Sendungen behalten (höchstens 7 Tage)
+        val past = HashMap<String, Int>()
+        for (it in items) {
+            val id = it.tvgId ?: continue
+            val d = Catchup.of(it)?.days ?: continue
+            val k = id.trim().lowercase()
+            past[k] = maxOf(past[k] ?: 0, d.coerceAtMost(GuideLogic.MAX_PAST_DAYS))
+        }
         job?.cancel()
         job = scope.launch {
+            // What the database already has is usable at once (no waiting for the import)
+            if (ids.isEmpty()) refreshView(app)
             status = "Wird geladen …"
             val active = { isActive }
-            val map = HashMap<String, MutableList<EpgEntry>>()
             var err: String? = null
-            truncated = false
-            // Sender mit Archiv (Catchup): auch vergangene Sendungen behalten (höchstens 7 Tage, Speicher)
-            val past = HashMap<String, Int>()
-            for (it in items) {
-                val id = it.tvgId ?: continue
-                val d = Catchup.of(it)?.days ?: continue
-                val k = id.lowercase()
-                past[k] = maxOf(past[k] ?: 0, d.coerceAtMost(7))
-            }
-            var newest = 0L
-            for (u in all) {
-                fetchIfAllowed(app, u, trigger, active)?.let { err = it }
-                val f = file(app, u)
-                if (!f.exists()) continue
-                newest = maxOf(newest, f.lastModified())
-                try { parse(f, wanted, map, past) } catch (e: Exception) { LoginDebug.error(u, "xmltv", e); err = if (e is PlaylistError) e.message else e.javaClass.simpleName }
-            }
+            for (u in all) fetchIfAllowed(app, u, trigger, active)?.let { err = it }
             if (!isActive) return@launch
             prune(app, all)
-            storedAt = newest
-            progs.clear()
-            for ((k, v) in map) progs[k] = v.sortedBy { it.start }
-            channelCount = progs.size
-            LoginDebug.info("xmltv: ${progs.size} channels with guide data" + (if (err != null) " (error: $err)" else ""))
-            status = if (progs.isEmpty()) "Keine Programmdaten erhalten (${err ?: "leer"})"
-            else if (truncated) "Geladen: ${progs.size} Sender mit Programm (gekürzt, Speicher knapp)"
-            else "Geladen: ${progs.size} Sender mit Programm"
+            val files = all.map { file(app, it) }.filter { it.exists() && it.length() > 0 }
+            storedAt = files.maxOfOrNull { it.lastModified() } ?: 0L
+            // OnAir Phase 3: import into SQLite only when the stored files, the wanted channels or the rules changed
+            val now = System.currentTimeMillis() / 1000
+            val sig = GuideLogic.signature(files.map { Triple(it.name, it.lastModified(), it.length()) }, wanted, past)
+            val current = runCatching { GuideDb.meta(app, "sig") }.getOrNull()
+            if (files.isNotEmpty() && sig != current) {
+                status = "Programm wird eingelesen …"
+                val t0 = System.currentTimeMillis()
+                try {
+                    val rows = GuideDb.replaceAll(app, sig) { sink -> for (f in files) parseInto(f, wanted, past, now, sink, active) }
+                    LoginDebug.info("guide import: $rows programmes in ${System.currentTimeMillis() - t0} ms")
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    LoginDebug.error("guide.db", "import", e)
+                    err = if (e is PlaylistError) e.message else e.javaClass.simpleName
+                }
+            } else {
+                runCatching { GuideDb.prune(app, GuideLogic.pruneBefore(now)) }
+            }
+            if (!isActive) return@launch
+            refreshView(app)
+            LoginDebug.info("guide: ${ids.size} channels, $rowCount programmes" + (if (err != null) " (error: $err)" else ""))
+            status = if (ids.isEmpty()) "Keine Programmdaten erhalten (${err ?: "leer"})"
+            else "Geladen: ${ids.size} Sender mit Programm"
         }
     }
 
     private fun parseTime(s: String?): Long? = xmltvTime(s)
 
-    private const val MAX_PER_CHANNEL = 80
-    private const val MAX_DESC = 400
-    @Volatile private var truncated = false
-
-    private fun shortDesc(d: String): String =
-        if (d.length <= MAX_DESC) d else d.substring(0, d.lastIndexOf(' ', MAX_DESC).takeIf { it > MAX_DESC / 2 } ?: MAX_DESC) + " …"
-
-    /** OnAir: parses a stored guide file (see [file]). */
-    private fun parse(f: File, wanted: Set<String>, out: HashMap<String, MutableList<EpgEntry>>, past: Map<String, Int> = emptyMap()) {
+    /**
+     * OnAir Phase 3: streams one stored guide file into the database import ([sink]). Keeps what [GuideLogic.keep] allows for
+     * wanted channels, with sub-title, categories and episode number. Nothing is collected in memory.
+     */
+    private fun parseInto(f: File, wanted: Set<String>, past: Map<String, Int>, now: Long, sink: GuideDb.Sink, active: () -> Boolean) {
         openStored(f).use { ins ->
             val p = Xml.newPullParser()
             p.setInput(ins, null)
-            val now = System.currentTimeMillis() / 1000
-            val pool = StringPool()
+            val cats = ArrayList<String>(4)
+            val eps = ArrayList<Pair<String?, String>>(2)
             var seen = 0
             var ev = p.eventType
             while (ev != XmlPullParser.END_DOCUMENT) {
                 if (ev == XmlPullParser.START_TAG && p.name == "programme") {
-                    val ch = p.getAttributeValue(null, "channel")?.lowercase()
+                    val ch = p.getAttributeValue(null, "channel")?.trim()?.lowercase()
                     val s = parseTime(p.getAttributeValue(null, "start"))
                     val e = parseTime(p.getAttributeValue(null, "stop"))
-                    var title = ""
-                    var desc = ""
-                    var inner = p.next()
-                    while (!(inner == XmlPullParser.END_TAG && p.name == "programme") && inner != XmlPullParser.END_DOCUMENT) {
-                        if (inner == XmlPullParser.START_TAG) {
-                            if (p.name == "title" && title.isEmpty()) title = p.nextText()
-                            else if (p.name == "desc" && desc.isEmpty()) desc = p.nextText()
+                    // Channels nobody can see: skip the whole element without reading its texts
+                    if (ch == null || ch !in wanted || s == null || e == null) {
+                        skipElement(p)
+                    } else {
+                        var title = ""
+                        var sub: String? = null
+                        var desc: String? = null
+                        cats.clear(); eps.clear()
+                        var inner = p.next()
+                        while (!(inner == XmlPullParser.END_TAG && p.name == "programme") && inner != XmlPullParser.END_DOCUMENT) {
+                            if (inner == XmlPullParser.START_TAG) when (p.name) {
+                                "title" -> if (title.isEmpty()) title = p.nextText().trim()
+                                "sub-title" -> if (sub == null) sub = p.nextText().trim().ifEmpty { null }
+                                "desc" -> if (desc == null) desc = p.nextText()
+                                "category" -> p.nextText().let { if (cats.size < 8) cats.add(it) }
+                                "episode-num" -> { val sys = p.getAttributeValue(null, "system"); eps.add(sys to p.nextText()) }
+                            }
+                            inner = p.next()
                         }
-                        inner = p.next()
+                        if (title.isNotEmpty() && epgSane(s, e) && GuideLogic.keep(s, e, now, past[ch] ?: 0)) {
+                            sink.add(ch, s, e, title, sub, GuideLogic.shortDesc(desc), GuideLogic.joinCategories(cats), GuideLogic.episode(eps))
+                        }
                     }
-                    val pd = if (ch != null) past[ch] ?: 0 else 0
-                    if (ch != null && ch in wanted && s != null && e != null &&
-                        e > now - (if (pd > 0) pd * 86400L else 3600L) && s < now + 129600 && epgSane(s, e)
-                    ) {
-                        val l = out.getOrPut(ch) { ArrayList() }
-                        if (l.size < MAX_PER_CHANNEL + pd * 48) l.add(EpgEntry(pool.of(title), shortDesc(desc), s, e))
-                    }
-                    // Speicher wird knapp: aufhören und das bisher Gelesene behalten (lieber Lücken im Programm als ein Absturz)
-                    if (++seen % 5000 == 0 && Mem.heapTight(0.70)) { truncated = true; return }
+                    if (++seen % 5000 == 0 && !active()) throw kotlinx.coroutines.CancellationException("abgebrochen")
                 }
                 ev = p.next()
+            }
+        }
+    }
+
+    /** Skips the current element (parser on its START_TAG) including everything inside. */
+    private fun skipElement(p: XmlPullParser) {
+        var depth = 1
+        while (depth > 0) {
+            when (p.next()) {
+                XmlPullParser.START_TAG -> depth++
+                XmlPullParser.END_TAG -> depth--
+                XmlPullParser.END_DOCUMENT -> return
             }
         }
     }
@@ -375,10 +440,15 @@ object Epg {
     }
 
     /** Laufende und kommende Sendungen eines Senders. Reihenfolge: Zwischenspeicher, geladenes XMLTV (sofort), dann Xtream-Abfrage. */
-    suspend fun now(item: Item): List<EpgEntry> {
+    /**
+     * OnAir Phase 3: [network] = this is the one channel the owner is looking at (focused panel, playing channel). Only then,
+     * and only if the guide database has no rows at all for the channel, is the provider asked (get_short_epg). List rows
+     * never ask.
+     */
+    suspend fun now(item: Item, network: Boolean = false): List<EpgEntry> {
         val nowMs = System.currentTimeMillis()
         val nowSec = nowMs / 1000
-        val local = Xmltv.forChannel(item.tvgId).filter { it.end > nowSec }
+        val local = withContext(Dispatchers.IO) { Xmltv.forChannel(item.tvgId) }.filter { it.end > nowSec }
         if (local.isNotEmpty() && current(local) != null) return local.take(8)
         // OnAir: per-channel answers are reused for 15 min (finished programmes dropped), "nothing" for 30 min –
         // scrolling the guide must not send one request per row again and again
@@ -386,7 +456,7 @@ object Epg {
             val ttl = if (l.isEmpty()) RefreshLogic.CHANNEL_EPG_EMPTY_TTL_MS else RefreshLogic.CHANNEL_EPG_TTL_MS
             if (nowMs - at in 0 until ttl) return l.filter { it.end > nowSec }.ifEmpty { local.take(8) }
         }
-        val url = xtreamApi(item, "get_short_epg")
+        val url = if (network && !Xmltv.has(item.tvgId)) xtreamApi(item, "get_short_epg") else null
         if (url != null && !ProviderGuard.coolingDown(nowMs)) {
             LoginDebug.request("$url&limit=8")
             val body = EpgNet.fetch("$url&limit=8")

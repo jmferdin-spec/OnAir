@@ -90,6 +90,8 @@ TV-Guide öffnen¦Open TV guide
 Filme und Serien deines Anbieters findest du unter „On Demand“.¦Your provider's movies and series are under “On Demand”.
 OK: Sender ansehen¦OK: watch channel
 Zurück = Startseite¦Back = home
+# OnAir: Phase 3 – guide database
+Programm wird eingelesen …¦Importing guide …
 # OnAir: rebrand
 OnAir basiert auf IPVIO Stream von Emrodev (github.com/Emrodev/IPVIO-Stream), ebenfalls GPL-3.0. Danke!¦OnAir is based on IPVIO Stream by Emrodev (github.com/Emrodev/IPVIO-Stream), also GPL-3.0. Thank you!
 # OnAir: provider rate-limit protection

@@ -73,6 +73,9 @@ object OnAirNav {
 
     fun openVod() { openedFrom = OnAirScreen.HOME; screen = OnAirScreen.VOD }
 
+    /** Hidden debug screen, opened from Settings → About (long-press the version); Back returns to Settings. */
+    fun openDebug() { openedFrom = OnAirScreen.VOD; screen = OnAirScreen.DEBUG }
+
     fun back() {
         val to = OnAirHomeLogic.backFrom(screen, openedFrom)
         if (to != OnAirScreen.GUIDE) { guideList = null; guideKey = null }

@@ -397,6 +397,9 @@ private fun AppContent() {
             OnAirNav.screen == OnAirScreen.GUIDE -> Box(Modifier.fillMaxSize().screenEnter()) {
                 GuideScreen(liveAll, onWatch = { ch, src -> watchFromGuide(ch, src) }, onArchive = { ch, e -> archiveFromGuide(ch, e) }) { OnAirNav.back() }
             }
+            OnAirNav.screen == OnAirScreen.DEBUG -> Box(Modifier.fillMaxSize().screenEnter()) {
+                OnAirDebugScreen(liveAll) { OnAirNav.back() }
+            }
             OnAirNav.screen == OnAirScreen.SOON -> Box(Modifier.fillMaxSize().screenEnter()) {
                 PhasePlaceholder(OnAirNav.tile, onBack = { OnAirNav.back() }) { OnAirNav.openGuide(OnAirScreen.HOME) }
             }
