@@ -46,7 +46,20 @@ These override anything below that says otherwise.
 
 ### Phase order
 
-0. Understand (done) · 1. Rebrand · **2. Five-tile home + standalone TV guide screen** · **3. Guide → SQLite first (parser keeps categories, episode numbers, sub-titles), then the "on now" logic** · 4. The four "now" screens · 5. Tuning.
+0. Understand · 1. Rebrand · 2. Five-tile home + standalone TV guide screen · 3. Guide → SQLite, then the "on now" logic · 4. The four "now" screens · 5. Tuning — **all done; v1.0 approved on the TV 2026-11-11** (tag `v1.0`).
+
+## v1.0 — what was built (2026-11-11)
+
+The phase specs below are kept as the original brief; this section is the state of the code. Later decisions made while building:
+
+- **Login / catalog:** Xtream loads through `player_api.php` (account check, live/VOD/series categories + streams, streamed JSON → M3U lines → IPVIO's parser), `get.php` only as fallback (`PlaylistStore.downloadApi`, `XtreamApiLogic`). Series episodes load on demand via `get_series_info` (`SeriesInfo` in `XtreamApi.kt`).
+- **Guide:** framework SQLite (`GuideDb`, rules in `GuideLogic`): staging table + atomic swap, re-import only when the stored files / wanted channels / `GuideLogic.SCHEMA` change. The import also records the UTC offsets of start times (debug screen). Readers (`Xmltv.forChannel`, `Epg.now`, `EpgFull.get`) keep their signatures.
+- **On now:** `OnNowLogic` (pure, tested) + `OnNow` (snapshot off the main thread, cached 60 s; per-playlist `ChanIndex` built once after each playlist load). Measured on the 4K Plus: ~400 ms per snapshot.
+- **PPV / events:** event channel = PPV/event **Xtream category** (`PPV_CATEGORY_WORDS`), or a clear PPV **name** ("PPV 01", "PPV:", "UFC PPV") — never a bare "Event"/"Main Event". Slots without an event name ("PPV 23", "[PPV] EVENTS 01:") are hidden from Events and counted.
+- **Events refresh:** `get_live_streams&category_id=…` for the PPV/event categories only, when the home or Events screen opens, at most every 30 min (`RefreshLogic.Trigger.EVENTS`, normal backoff, through `ProviderGuard`). New names are an overlay (`EventNames`, item id → name) applied in `PlaylistStore.setItems`; a full catalog download clears it.
+- **Sports:** a sports Xtream category alone is not enough — the title needs a sports signal (`SPORT_TITLE_WORDS`, league keywords, "vs"/"@"); otherwise it is a Show. "Football" = soccer on UK/international channels, NFL on US channels; beIN defaults to soccer; extra group **Horse Racing** (racing channels: Sky Sports Racing, TVG, FanDuel TV, Racing UK …). All keyword tables are data in `OnNowLogic`.
+- **Screens:** `OnAirHome.kt` (tiles with live counts, `OnAirNav`), `GuideScreen.kt`, `NowScreens.kt` (Movies/Shows/Sports/Events, detail panel with source picker; Sports: Up/Down stay in the sport list, Right/OK into the cards, Back returns to the sport), rules in `NowScreenLogic` / `OnAirHomeLogic`. Hidden debug screen: `OnAirDebug.kt` (Settings → About → long-press the version).
+- **Logging** (`LoginDebug`, tag `OnAirLogin`, always masked): errors in every build; status lines in debug builds; request/response tracing only when `LoginDebug.VERBOSE` is switched on in a debug build.
 
 ## Phase 0 — Understand before changing (no code changes)
 
@@ -176,6 +189,20 @@ adb -s <onn-4k-plus-ip>:5555 install -r app/build/outputs/apk/debug/app-debug.ap
 ```
 
 On the TV: Settings → System → About → tap "Android TV OS build" 7 times → Developer options → enable USB debugging / Wireless debugging.
+
+## Release build (signed)
+
+Since v1.0 the TV runs the **release** build. Debug and release are signed with different keys, so switching between them on the TV needs an uninstall, which **deletes the login and all app data** — ask the owner first. Release updates install in place (`install -r`) and keep the data.
+
+- **Keystore:** `%USERPROFILE%\.onair\onair-release.jks` (PKCS12, alias `onair`, RSA 4096, valid until 2054; certificate SHA-256 `1B:D4:07:49:33:72:41:B0:1A:0F:E3:25:AB:8C:89:0A:E5:36:88:62:59:63:42:C0:BC:3C:F3:65:B3:57:65:D7`).
+- **Passwords:** `%USERPROFILE%\.onair\signing.properties` (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`). The folder is readable by the owner's Windows account only. **Never commit either file, never copy them into the repo, never print the passwords.** Back both up somewhere safe (password manager / offline copy): without them future updates can't install over the current app without wiping it.
+- `app/build.gradle.kts` reads that file (or `-Ponair.signing=<path>` / env `ONAIR_SIGNING`); without it the release build is unsigned.
+- **R8 keep rules:** `app/proguard-rules.pro` — `-keeppackagenames` for the optimised scopes (R8 moved a Kotlin multi-file facade class out of its package → `IllegalAccessError` at launch) and the Room `RoomDatabase` constructor (Room 2.6.1's rule is incomplete under R8 full mode → `NoSuchMethodException` at launch). After changing dependencies or R8 settings, launch the release build on the TV and check `adb logcat` for `FATAL` before tagging.
+
+```
+./gradlew assembleRelease
+adb -s <onn-4k-plus-ip>:5555 install -r app/build/outputs/apk/release/app-release.apk
+```
 
 ## Definition of done (v1)
 

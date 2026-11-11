@@ -14,6 +14,14 @@ val secrets = Properties().apply {
 fun secret(name: String): String =
     (secrets.getProperty(name) ?: System.getenv(name) ?: "").trim().filter { it.isLetterOrDigit() }
 
+// OnAir release signing: keystore and passwords live OUTSIDE the repo (see CLAUDE.md, "Release build").
+// Default file: <user home>/.onair/signing.properties (storeFile, storePassword, keyAlias, keyPassword);
+// another location via -Ponair.signing=<path> or the ONAIR_SIGNING environment variable.
+// Without the file the release build still builds, just unsigned.
+val signingFile = ((findProperty("onair.signing") as String?) ?: System.getenv("ONAIR_SIGNING"))?.let { file(it) }
+    ?: File(System.getProperty("user.home"), ".onair/signing.properties")
+val signing = Properties().apply { if (signingFile.exists()) signingFile.inputStream().use { load(it) } }
+
 android {
     namespace = "com.ipvio.stream"
     compileSdk {
@@ -31,11 +39,23 @@ android {
         buildConfigField("String", "OMDB_KEY", "\"${secret("OMDB_KEY")}\"")
     }
 
+    signingConfigs {
+        if (signing.getProperty("storeFile") != null) create("onair") {
+            storeFile = file(signing.getProperty("storeFile"))
+            storePassword = signing.getProperty("storePassword")
+            keyAlias = signing.getProperty("keyAlias")
+            keyPassword = signing.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
         release {
+            signingConfigs.findByName("onair")?.let { signingConfig = it }
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
+                // OnAir: keeps R8 from moving classes out of their packages (release crashed at launch, see the file)
+                keepRules { files.add(file("proguard-rules.pro")) }
             }
         }
     }
