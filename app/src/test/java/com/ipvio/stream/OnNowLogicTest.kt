@@ -95,10 +95,81 @@ class OnNowLogicTest {
         assertEquals(OnNowClass.SPORTS, cls("Highland Derby", "UK", cats = listOf("Football")))
     }
 
-    @Test fun sportsByXtreamGroup() {
+    @Test fun sportsByXtreamGroupNeedsASportsTitle() {
         assertEquals(OnNowClass.SPORTS, cls("Pregame Show", "SPORTS NETWORKS"))
         assertEquals(OnNowClass.SPORTS, cls("Resumen de la Jornada", "FUTBOL"))
-        assertEquals(OnNowClass.SPORTS, cls("Lo Mejor de la Semana", "ES| DEPORTES"))
+        // a sports category alone is not enough: no sports signal in the title → Show
+        assertEquals(OnNowClass.SHOW, cls("Lo Mejor de la Semana", "ES| DEPORTES"))
+    }
+
+    // ------------------------------------------------------------------ owner's tuning (debug samples)
+
+    @Test fun sportsChannelWithoutSportsTitleIsAShow() {
+        // reported: "Kirstie and Phil's Love It or List It" on PREMIER SPORTS 1 should be a Show
+        assertEquals(OnNowClass.SHOW, cls("Kirstie and Phil's Love It or List It", "UK| SPORTS", name = "PREMIER SPORTS 1"))
+        assertEquals(OnNowClass.SHOW, cls("Kirstie and Phil's Love It or List It", "SPORTS", name = "PREMIER SPORTS 1"))
+        assertEquals(OnNowClass.SHOW, cls("Kitchen Rescue", "US| SPORTS", name = "Sports Net 2"))
+        // with a sports signal in the title it stays Sports
+        for (t in listOf("Sports Desk", "Live: Darts World Championship", "Grand Prix Highlights", "Cup Final", "Match of the Day",
+            "Northside v Eastport", "Harbor City @ Lakeview", "Golf Central", "Super Rugby: Final", "Monster Energy Supercross"))
+            assertEquals(t, OnNowClass.SPORTS, cls(t, "UK| SPORTS", name = "PREMIER SPORTS 1"))
+        // still never Sports: paid programming on a sports channel
+        assertEquals(OnNowClass.OTHER, cls("Paid Programming", "UK| SPORTS", name = "PREMIER SPORTS 1"))
+    }
+
+    private fun sportOn(title: String, name: String, group: String = "UK| SPORTS") = OnNowLogic.sportOf(prog(title), chan(name, group))
+
+    @Test fun soccerCompetitions() {
+        assertEquals(Sport.SOCCER, sportOn("EFL Highlights", "Sky Sports Football"))
+        assertEquals(Sport.SOCCER, sportOn("FA Cup: Northside v Eastport", "BBC One"))
+        assertEquals(Sport.SOCCER, sportOn("Carabao Cup Final: City v United", "Sky Sports Main Event"))
+        assertEquals(Sport.SOCCER, sportOn("Championship: Leeds v Burnley", "Sky Sports Football"))
+        assertEquals(Sport.SOCCER, sportOn("Live Championship Football", "Sky Sports Main Event"))
+        assertEquals(Sport.SOCCER, sportOn("SPL: Glenview v Rockhill", "Premier Sports 1"))
+        assertEquals(Sport.SOCCER, sportOn("Bundesliga: Nordstadt v Südhafen", "Sky Sports Mix"))
+        // "Championship" without soccer context is not soccer
+        assertEquals(Sport.OTHER, sportOn("Darts Championship", "Sports Net", "US| SPORTS"))
+        assertEquals(Sport.OTHER, OnNowLogic.sportOf(prog("Cornhole Championship"), chan("Sports Net", "SPORTS NETWORKS")))
+    }
+
+    @Test fun footballIsSoccerOnUkChannelsAndNflOnUsChannels() {
+        assertEquals(Sport.SOCCER, sportOn("Live Football: City v United", "Sky Sports Football"))
+        assertEquals(Sport.SOCCER, sportOn("Football Focus", "BBC One"))
+        assertEquals(Sport.SOCCER, sportOn("Live Football", "TNT Sports 1"))
+        assertEquals(Sport.SOCCER, sportOn("Football Highlights", "beIN SPORTS 2", "AR| SPORTS"))
+        assertEquals(Sport.SOCCER, sportOn("International Football", "Premier Sports 2"))
+        assertEquals(Sport.SOCCER, sportOn("Football Tonight", "ITV1", "UK| ENTERTAINMENT"))
+        assertEquals(Sport.NFL, sportOn("Football: Wolves at Rams", "ESPN", "US| SPORTS"))
+        assertEquals(Sport.NFL, sportOn("Sunday Night Football", "Sky Sports Main Event"))   // named NFL show wins
+        assertEquals(Sport.COLLEGE_FOOTBALL, sportOn("College Football: State vs Tech", "Sky Sports Main Event"))
+    }
+
+    @Test fun beinDefaultsToSoccer() {
+        assertEquals(Sport.SOCCER, sportOn("Weekend Review Live", "beIN SPORTS 1", "US| SPORTS"))
+        assertEquals(Sport.TENNIS, sportOn("ATP Masters: Final", "beIN SPORTS 1", "US| SPORTS"))   // another sport matches
+        assertEquals(Sport.OTHER, sportOn("Weekend Review Live", "Sports Net", "US| SPORTS"))
+    }
+
+    @Test fun motorsportsNewKeywordsAndNoBareRacing() {
+        for (t in listOf("WorldSBK Superbike Race 2", "Monster Energy Supercross", "Pro Motocross: Round 4", "MotoAmerica Superbike Live"))
+            assertEquals(t, Sport.MOTORSPORTS, sportOn(t, "Sports Net", "US| SPORTS"))
+        // "Racing" / "Raceday" alone is not motorsports
+        assertEquals(Sport.OTHER, sportOn("Racing", "Sports Net", "US| SPORTS"))
+        assertEquals(Sport.OTHER, sportOn("Raceday", "Sports Net", "US| SPORTS"))
+    }
+
+    @Test fun horseRacingGroup() {
+        assertEquals(Sport.HORSE_RACING, sportOn("Raceday Live", "Sky Sports Racing"))
+        assertEquals(Sport.HORSE_RACING, sportOn("Racing", "TVG", "US| SPORTS"))
+        assertEquals(Sport.HORSE_RACING, sportOn("Derby Day", "FanDuel TV", "US| SPORTS"))
+        assertEquals(Sport.HORSE_RACING, sportOn("Stakes Saturday", "Racing UK"))
+        assertEquals(Sport.HORSE_RACING, sportOn("Kentucky Derby", "NBC", "US| NETWORK"))      // the race itself, any channel
+        // racing words count only on racing channels; a football derby stays soccer
+        assertEquals(Sport.SOCCER, sportOn("Derby: Northside v Eastport", "Sky Sports Football"))
+        // classified as Sports on a racing channel, also without a sports category
+        assertEquals(OnNowClass.SPORTS, cls("Racing", "US| ENTERTAINMENT", name = "TVG"))
+        assertEquals(OnNowClass.SPORTS, cls("Raceday Live", "UK| SPORTS", name = "Sky Sports Racing"))
+        assertEquals("Horse Racing", Sport.HORSE_RACING.label)
     }
 
     @Test fun sportsByGameTitleWithSportKeyword() {

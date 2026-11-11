@@ -9,7 +9,7 @@ enum class OnNowClass { EVENT, SPORTS, MOVIE, SHOW, OTHER }
 enum class Sport(val label: String) {
     NFL("NFL"), COLLEGE_FOOTBALL("College Football"), NBA("NBA"), COLLEGE_BASKETBALL("College Basketball"),
     MLB("MLB"), NHL("NHL"), SOCCER("Soccer"), COMBAT("Combat Sports"), GOLF("Golf"), TENNIS("Tennis"),
-    MOTORSPORTS("Motorsports"), OTHER("Other Sports")
+    MOTORSPORTS("Motorsports"), HORSE_RACING("Horse Racing"), OTHER("Other Sports")
 }
 
 /**
@@ -163,12 +163,68 @@ object OnNowLogic {
         "NO EVENT", "NO EVENTS", "NO EVENT SCHEDULED", "NO EVENTS SCHEDULED", "NO EVENT TODAY", "NO LIVE EVENT", "SIN EVENTO", "SIN EVENTOS"
     )
 
-    /** One sport rule: any keyword (whole words), and – if given – one of the [context] words somewhere in the texts. */
-    class SportRule(val sport: Sport, keywords: List<String>, context: List<String> = emptyList()) {
+    /**
+     * One sport rule: any keyword (whole words), and – if given – one of the [context] words somewhere in the texts, and
+     * [onlyIf] true for the programme on its channel. [resolve] picks the sport from the channel instead of [sport]
+     * (e.g. "Football" = soccer on UK / international channels, NFL on US channels).
+     */
+    class SportRule(
+        val sport: Sport, keywords: List<String>, context: List<String> = emptyList(),
+        internal val onlyIf: ((Facts) -> Boolean)? = null,
+        internal val resolve: ((Facts) -> Sport)? = null
+    ) {
         internal val words = keywords.map { pad(norm(it)) }
         internal val ctx = context.map { pad(norm(it)) }
-        internal fun matches(text: String, all: String): Boolean = words.any { text.contains(it) } && (ctx.isEmpty() || ctx.any { all.contains(it) })
+        internal fun matches(text: String, f: Facts): Boolean =
+            words.any { text.contains(it) } && (ctx.isEmpty() || ctx.any { f.all.contains(it) }) && (onlyIf == null || onlyIf.invoke(f))
+        internal fun sportFor(f: Facts): Sport = resolve?.invoke(f) ?: sport
     }
+
+    /**
+     * Channels where "Football" means soccer: UK / international broadcasters (channel name, whole words) or a UK /
+     * international Xtream category. Everything else (US channels) reads "Football" as American football.
+     */
+    val INTL_FOOTBALL_CHANNEL_WORDS = listOf(
+        "SKY SPORTS", "SKY SPORT", "TNT SPORTS", "BT SPORT", "BEIN", "BEIN SPORTS", "BEIN SPORT", "PREMIER SPORTS", "BBC", "ITV",
+        "EUROSPORT", "VIAPLAY", "SPORTDIGITAL", "SUPERSPORT", "LALIGA TV", "PREMIER LEAGUE TV", "MUTV", "LFCTV", "CHELSEA TV",
+        "RTE", "TG4", "S4C", "CHANNEL 4", "CHANNEL 5", "OPTUS SPORT", "MOVISTAR", "CANAL"
+    )
+    val INTL_GROUP_WORDS = listOf(
+        "UK", "GB", "IE", "IRELAND", "EU", "EUROPE", "INT", "INTL", "INTERNATIONAL", "AFRICA", "ARABIC", "AR", "ES", "ESPANA",
+        "SPAIN", "DE", "FR", "IT", "NL", "PT", "TR", "SCOTLAND", "WALES"
+    )
+    /** beIN channels: a sports programme that matches no other group is soccer. */
+    val SOCCER_DEFAULT_CHANNEL_WORDS = listOf("BEIN", "BEIN SPORTS", "BEIN SPORT")
+    /** Soccer context for "Championship" (the English second tier) when the channel is not clearly a soccer channel. */
+    val SOCCER_CONTEXT_WORDS = listOf("SOCCER", "EFL", "FUTBOL", "SKY SPORTS FOOTBALL", "SKY BET", "FA CUP")
+
+    /** Horse racing channels (channel name, whole words). */
+    val HORSE_RACING_CHANNEL_WORDS = listOf(
+        "SKY SPORTS RACING", "TVG", "TVG2", "TVG 2", "FANDUEL TV", "FANDUEL RACING", "RACING UK", "RACING TV", "AT THE RACES", "ATR"
+    )
+    /** On a horse racing channel these title words are racing (and a sports signal). */
+    val HORSE_RACING_TITLE_WORDS = listOf(
+        "RACEDAY", "RACE DAY", "RACING", "RACE", "RACES", "DERBY", "STAKES", "HANDICAP", "HURDLE", "CHASE", "POST TIME", "TROT", "HARNESS"
+    )
+    /** Horse racing anywhere, whatever the channel. */
+    val HORSE_RACING_WORDS = listOf(
+        "HORSE RACING", "KENTUCKY DERBY", "PREAKNESS", "BELMONT STAKES", "BREEDERS CUP", "ROYAL ASCOT", "CHELTENHAM FESTIVAL",
+        "GRAND NATIONAL", "EPSOM DERBY", "PRIX DE L ARC", "MELBOURNE CUP"
+    )
+
+    /**
+     * A sports Xtream category alone does not make a programme Sports – the title must show it too: a sport / league
+     * keyword ([SPORT_RULES], [SPORT_CATEGORY_WORDS]), a game ("A vs B", "A @ B"), or one of these words. Without one,
+     * a programme on a sports channel is a Show ("Kirstie and Phil's Love It or List It" on Premier Sports 1).
+     */
+    val SPORT_TITLE_WORDS = listOf(
+        "LIVE", "EN VIVO", "AO VIVO", "EN DIRECTO", "DIRECTO", "HIGHLIGHTS", "MATCH", "MATCHDAY", "MATCH OF THE DAY", "GAME", "GAMES",
+        "GAMEDAY", "GAME DAY", "CUP", "CHAMPIONSHIP", "CHAMPIONSHIPS", "GRAND PRIX", "GP", "TOURNAMENT", "FINAL", "FINALS",
+        "SEMIFINAL", "SEMI FINAL", "QUARTERFINAL", "QUARTER FINAL", "PLAYOFF", "PLAYOFFS", "LEAGUE", "BOWL", "KICKOFF", "KICK OFF",
+        "PREGAME", "POSTGAME", "PRE MATCH", "POST MATCH", "QUALIFYING", "PRACTICE", "FIGHT", "FIGHT NIGHT", "BOUT", "MEET",
+        "SPORT", "SPORTS", "SPORTSCENTER", "DEPORTES", "PARTIDO", "JORNADA", "RESUMEN", "GOLES", "CLASICO", "TORNEO",
+        "CAMPEONATO", "REPLAY", "RACE", "DERBY", "OPEN", "MASTERS"
+    )
 
     /**
      * Sport groups, checked in this order on the title, then the EPG categories, then the channel name, then the Xtream
@@ -180,22 +236,38 @@ object OnNowLogic {
         SportRule(Sport.COLLEGE_FOOTBALL, listOf("SEC", "BIG TEN", "BIG 12", "ACC", "PAC 12"), context = listOf("FOOTBALL", "FUTBOL AMERICANO")),
         SportRule(Sport.NFL, listOf(
             "NFL", "FOOTBALL NIGHT", "THURSDAY NIGHT FOOTBALL", "SUNDAY NIGHT FOOTBALL", "MONDAY NIGHT FOOTBALL",
-            "NFL REDZONE", "REDZONE", "FUTBOL AMERICANO"
+            "NFL REDZONE", "REDZONE", "FUTBOL AMERICANO", "SUPER BOWL", "AFC CHAMPIONSHIP", "NFC CHAMPIONSHIP"
         )),
+        // Horse racing before soccer ("Derby") and motorsports ("Racing"); racing words only on racing channels
+        SportRule(Sport.HORSE_RACING, HORSE_RACING_WORDS),
+        SportRule(Sport.HORSE_RACING, HORSE_RACING_TITLE_WORDS, onlyIf = { isHorseRacingChannel(it.chan) }),
+        // "Football" alone: soccer on UK / international channels, American football (NFL) on US channels
+        SportRule(Sport.NFL, listOf("FOOTBALL"), resolve = { if (isIntlFootballChannel(it.chan)) Sport.SOCCER else Sport.NFL }),
         SportRule(Sport.COLLEGE_BASKETBALL, listOf("NCAAB", "COLLEGE BASKETBALL", "NCAAM", "NCAAW", "MARCH MADNESS")),
         SportRule(Sport.NBA, listOf("NBA")),
         SportRule(Sport.MLB, listOf("MLB", "BASEBALL", "BEISBOL")),
         SportRule(Sport.NHL, listOf("NHL", "HOCKEY")),
         SportRule(Sport.SOCCER, listOf(
             "SOCCER", "FUTBOL", "LIGA MX", "MLS", "PREMIER LEAGUE", "EPL", "LA LIGA", "LALIGA", "SERIE A", "BUNDESLIGA",
-            "LIGUE 1", "CHAMPIONS LEAGUE", "UEFA", "COPA"
+            "2 BUNDESLIGA", "LIGUE 1", "CHAMPIONS LEAGUE", "EUROPA LEAGUE", "CONFERENCE LEAGUE", "UEFA", "COPA",
+            "EFL", "FA CUP", "CARABAO", "CARABAO CUP", "EFL CUP", "LEAGUE CUP", "SKY BET CHAMPIONSHIP", "SPL", "SPFL",
+            "SCOTTISH PREMIERSHIP", "EREDIVISIE", "PRIMEIRA LIGA", "SUPER LIG", "SAUDI PRO LEAGUE", "WSL", "MATCH OF THE DAY"
         )),
+        // "Championship" = the English second tier, but only with soccer context or a UK / international football channel
+        SportRule(Sport.SOCCER, listOf("CHAMPIONSHIP"), onlyIf = { f ->
+            anyWord(f.all, soccerCtxW) || (f.all.contains(" FOOTBALL ") && isIntlFootballChannel(f.chan))
+        }),
         SportRule(Sport.COMBAT, listOf("UFC", "MMA", "BOXING", "BOXEO", "BELLATOR", "PFL", "WWE", "AEW", "WRESTLING", "LUCHA LIBRE")),
         SportRule(Sport.GOLF, listOf("GOLF", "PGA", "LPGA")),
         SportRule(Sport.GOLF, listOf("LIV"), context = listOf("GOLF")),   // "LIV" alone is also a Roman numeral
         SportRule(Sport.TENNIS, listOf("TENNIS", "TENIS", "ATP", "WTA")),
         SportRule(Sport.TENNIS, listOf("OPEN"), context = listOf("TENNIS", "TENIS", "ATP", "WTA")),
-        SportRule(Sport.MOTORSPORTS, listOf("NASCAR", "F1", "FORMULA 1", "FORMULA ONE", "FORMULA UNO", "INDYCAR", "MOTOGP", "RACING"))
+        // "Racing" / "Raceday" alone is not motorsports (horse racing uses them too)
+        SportRule(Sport.MOTORSPORTS, listOf(
+            "NASCAR", "F1", "FORMULA 1", "FORMULA ONE", "FORMULA UNO", "FORMULA E", "INDYCAR", "INDY 500", "MOTOGP", "MOTO GP",
+            "SUPERBIKE", "SUPERBIKES", "WORLDSBK", "WSBK", "BSB", "SUPERCROSS", "MOTOCROSS", "MXGP", "MOTOAMERICA", "NHRA",
+            "IMSA", "WRC", "LE MANS", "DAYTONA 500", "SUPERCARS", "MOTORSPORT", "MOTORSPORTS"
+        ))
     )
 
     // ================================================================== text helpers
@@ -226,6 +298,13 @@ object OnNowLogic {
     private val slotWords by lazy { PPV_SLOT_WORDS.map { norm(it) }.toHashSet() }
     private val COUNTRY_PREFIX = Regex("""^\s*(?:\[[A-Za-z]{2,3}\]|[A-Za-z]{2,3}\s*[:|]|[A-Za-z]{2,3}\s+-)\s*""")
     private val NUMBERISH = Regex("""\d+(?:ST|ND|RD|TH)?|PPV\d+""")
+    private val intlChanW by lazy { words(INTL_FOOTBALL_CHANNEL_WORDS) }
+    private val intlGroupW by lazy { words(INTL_GROUP_WORDS) }
+    private val soccerDefaultW by lazy { words(SOCCER_DEFAULT_CHANNEL_WORDS) }
+    private val soccerCtxW by lazy { words(SOCCER_CONTEXT_WORDS) }
+    private val horseChanW by lazy { words(HORSE_RACING_CHANNEL_WORDS) }
+    private val horseTitleW by lazy { words(HORSE_RACING_TITLE_WORDS) }
+    private val sportTitleW by lazy { words(SPORT_TITLE_WORDS) }
     private val junkW = words(JUNK_WORDS)
     private val sportCatP = parts(SPORT_CATEGORY_PARTS)
     private val sportCatW = words(SPORT_CATEGORY_WORDS)
@@ -312,11 +391,29 @@ object OnNowLogic {
         val minutes = ((pt.prog.stop - pt.prog.start) / 60).toInt()
     }
 
+    /** UK / international channel, where "Football" is soccer ([INTL_FOOTBALL_CHANNEL_WORDS], [INTL_GROUP_WORDS]). */
+    fun isIntlFootballChannel(c: Chan): Boolean = anyWord(c.nName, intlChanW) || anyWord(c.nGroup, intlGroupW)
+
+    fun isHorseRacingChannel(c: Chan): Boolean = anyWord(c.nName, horseChanW)
+
     private fun hasSportKeyword(f: Facts): Boolean =
         anyWord(f.all, sportCatW) || SPORT_RULES.any { r -> r.words.any { f.all.contains(it) } && (r.ctx.isEmpty() || r.ctx.any { f.all.contains(it) }) }
 
+    /** The title itself says sport: a sport / league keyword, a game, or a word like Live, Highlights, Cup, Grand Prix. */
+    fun hasSportTitleSignal(f: Facts): Boolean =
+        f.pt.gameTitle || anyWord(f.title, sportTitleW) || anyWord(f.title, sportCatW) ||
+            SPORT_RULES.any { it.matches(f.title, f) } ||
+            (isHorseRacingChannel(f.chan) && anyWord(f.title, horseTitleW))
+
+    private fun sportsGroup(f: Facts): Boolean = anyPart(f.group, sportGroupP)
+
+    /**
+     * Sports: the EPG category says so; or a sports Xtream category (or a racing channel) AND a sports signal in the title;
+     * or a game title with a sport keyword anywhere. A sports category alone is not enough (see [SPORT_TITLE_WORDS]).
+     */
     private fun isSports(f: Facts): Boolean =
-        anyPart(f.cats, sportCatP) || anyWord(f.cats, sportCatW) || anyPart(f.group, sportGroupP) ||
+        anyPart(f.cats, sportCatP) || anyWord(f.cats, sportCatW) ||
+            ((sportsGroup(f) || isHorseRacingChannel(f.chan)) && hasSportTitleSignal(f)) ||
             (f.pt.gameTitle && hasSportKeyword(f))
 
     /** Class of [prog] on [chan]; null = placeholder title (shown nowhere). */
@@ -332,13 +429,16 @@ object OnNowLogic {
         val movieGroup = anyPart(f.group, movieGroupP)
         val showCat = anyPart(f.cats, showCatP)
         if (movieGroup && p.episode == null && !showCat && f.minutes >= MOVIE_MIN_MINUTES) return OnNowClass.MOVIE
-        if (showCat || p.episode != null || movieGroup || anyPart(f.group, entGroupP) || anyWord(f.group, entGroupW)) return OnNowClass.SHOW
+        // a sports channel's programme without any sports signal (a property or cooking show) is a show
+        if (showCat || p.episode != null || movieGroup || anyPart(f.group, entGroupP) || anyWord(f.group, entGroupW) || sportsGroup(f)) return OnNowClass.SHOW
         return OnNowClass.OTHER
     }
 
     /** Sport group of a Sports item: title, then EPG categories, then channel name, then Xtream category. */
     fun sportOf(f: Facts): Sport {
-        for (text in listOf(f.title, f.cats, f.name, f.group)) for (r in SPORT_RULES) if (r.matches(text, f.all)) return r.sport
+        for (text in listOf(f.title, f.cats, f.name, f.group)) for (r in SPORT_RULES) if (r.matches(text, f)) return r.sportFor(f)
+        // beIN: sport that matches nothing else is soccer
+        if (anyWord(f.chan.nName, soccerDefaultW)) return Sport.SOCCER
         return Sport.OTHER
     }
 
