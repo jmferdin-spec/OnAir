@@ -269,6 +269,18 @@ private fun AppContent() {
         start(ch, ch.title, ch.url)
     }
 
+    /**
+     * OnAir Phase 4: watch a channel chosen on a "now" screen; the screen's channels become the zapping list.
+     * Back from the player returns to that screen (it stays the OnAir screen underneath).
+     */
+    fun watchFromNow(ch: OnNowLogic.Chan, zap: List<OnNowLogic.Chan>) {
+        val byId = liveAll.associateBy { it.id }
+        val item = byId[ch.id] ?: return
+        val list = zap.mapNotNull { byId[it.id] }.ifEmpty { listOf(item) }
+        ZapContext.list = list; ZapContext.key = "ONAIR_" + OnAirNav.tile.name
+        start(item, item.title, item.url)
+    }
+
     /** OnAir: a past programme of a catch-up channel picked in the standalone guide. */
     fun archiveFromGuide(ch: Item, e: EpgEntry) {
         val url = Catchup.urlFor(ch, e)
@@ -402,12 +414,17 @@ private fun AppContent() {
             OnAirNav.screen == OnAirScreen.DEBUG -> Box(Modifier.fillMaxSize().screenEnter()) {
                 OnAirDebugScreen(liveAll) { OnAirNav.back() }
             }
-            OnAirNav.screen == OnAirScreen.SOON -> Box(Modifier.fillMaxSize().screenEnter()) {
-                PhasePlaceholder(OnAirNav.tile, onBack = { OnAirNav.back() }) { OnAirNav.openGuide(OnAirScreen.HOME) }
-            }
+            // OnAir Phase 4: Movies, Shows, Sports, Events on now
+            OnAirNav.screen == OnAirScreen.NOW -> key(OnAirNav.tile) { Box(Modifier.fillMaxSize().screenEnter()) {
+                NowScreen(
+                    OnAirNav.tile, liveAll,
+                    onWatch = { ch, zap -> watchFromNow(ch, zap) },
+                    onGuide = { OnAirNav.openGuide(OnAirScreen.HOME) }
+                ) { OnAirNav.back() }
+            } }
             OnAirNav.screen == OnAirScreen.HOME -> Box(Modifier.fillMaxSize().screenEnter()) {
                 OnAirHomeScreen(
-                    liveCount = liveAll.size, focusTile = OnAirNav.tile,
+                    live = liveAll, focusTile = OnAirNav.tile,
                     onTile = { OnAirNav.openTile(it) },
                     onOnDemand = { goTab(MenuLogic.HOME); OnAirNav.openVod() },
                     onSettings = { goTab(MenuLogic.SETTINGS); OnAirNav.openVod() },

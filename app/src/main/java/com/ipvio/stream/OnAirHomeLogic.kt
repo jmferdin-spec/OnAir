@@ -14,8 +14,8 @@ enum class OnAirScreen {
     HOME,
     /** Standalone TV guide (opened by the Live TV tile, the sidebar's EPG entry or Live TV → TV-Guide). */
     GUIDE,
-    /** "Coming in Phase 4" placeholder for Movies, Shows, Sports and Events. */
-    SOON,
+    /** Movies, Shows, Sports or Events on now (Phase 4) – which one is [OnAirNav.tile]. */
+    NOW,
     /** IPVIO's own home with sidebar (Movies/Series browsing, search, settings) – reached via "On Demand". */
     VOD,
     /** Hidden debug screen (Settings → About → long-press the version number). */
@@ -27,13 +27,18 @@ object OnAirHomeLogic {
     /** Focus when the home screen opens for the first time. */
     val INITIAL = OnAirTile.LIVE
 
-    /** Tiles that open a real screen in this phase; the others show the placeholder. */
-    fun isReady(t: OnAirTile): Boolean = t == OnAirTile.LIVE
+    /** Live TV opens the standalone guide; the other four open their "on now" screen. */
+    fun opensGuide(t: OnAirTile): Boolean = t == OnAirTile.LIVE
 
-    /** Small line under the label: live channel count for Live TV (cheap), a hint for sections that come later. */
-    fun subtitle(t: OnAirTile, liveChannels: Int): String? = when {
+    /**
+     * Small line under the label: channel count for Live TV, "12 on now" for the others once the first snapshot is there
+     * ([onNow] null = not computed yet: the tiles show at once and the counts follow). Events: "3 live".
+     */
+    fun subtitle(t: OnAirTile, liveChannels: Int, onNow: Int? = null): String? = when {
         t == OnAirTile.LIVE -> if (liveChannels > 0) "$liveChannels Sender" else null
-        else -> "Kommt in Phase 4"
+        onNow == null -> null
+        t == OnAirTile.EVENTS -> if (onNow == 0) "Gerade nichts live" else "$onNow live"
+        else -> if (onNow == 0) "Gerade nichts" else "$onNow laufen gerade"
     }
 
     /**
@@ -57,7 +62,7 @@ object OnAirHomeLogic {
 
     /** Back from the guide or the placeholder: to the screen it was opened from (IPVIO's Live TV keeps its place). */
     fun backFrom(screen: OnAirScreen, openedFrom: OnAirScreen): OnAirScreen = when (screen) {
-        OnAirScreen.GUIDE, OnAirScreen.SOON -> if (openedFrom == OnAirScreen.VOD) OnAirScreen.VOD else OnAirScreen.HOME
+        OnAirScreen.GUIDE, OnAirScreen.NOW -> if (openedFrom == OnAirScreen.VOD) OnAirScreen.VOD else OnAirScreen.HOME
         OnAirScreen.DEBUG -> OnAirScreen.VOD
         OnAirScreen.VOD -> OnAirScreen.HOME
         OnAirScreen.HOME -> OnAirScreen.HOME

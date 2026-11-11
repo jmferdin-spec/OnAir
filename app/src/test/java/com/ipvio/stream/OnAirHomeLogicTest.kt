@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** OnAir Phase 2: five-tile home, standalone guide, placeholders. */
+/** OnAir Phase 2/4: five-tile home, standalone guide, "now" screens and their tile counts. */
 class OnAirHomeLogicTest {
 
     @Test fun fiveTilesInSpecOrderLiveFirst() {
@@ -18,17 +18,23 @@ class OnAirHomeLogicTest {
         I18nCore.load(DictA, DictB, DictC, DictD, DictE, DictF, DictG, DictH, DictI)
         assertEquals(listOf("Live TV", "Movies", "Shows", "Sports", "Events"), OnAirHomeLogic.TILES.map { I18nCore.translate(it.label, 1) })
         assertEquals("1234 channels", I18nCore.translate(OnAirHomeLogic.subtitle(OnAirTile.LIVE, 1234)!!, 1))
-        assertEquals("Coming in Phase 4", I18nCore.translate(OnAirHomeLogic.subtitle(OnAirTile.SPORTS, 1234)!!, 1))
+        assertEquals("12 on now", I18nCore.translate(OnAirHomeLogic.subtitle(OnAirTile.MOVIES, 1234, 12)!!, 1))
+        assertEquals("Nothing on now", I18nCore.translate(OnAirHomeLogic.subtitle(OnAirTile.SHOWS, 1234, 0)!!, 1))
+        assertEquals("3 live", I18nCore.translate(OnAirHomeLogic.subtitle(OnAirTile.EVENTS, 1234, 3)!!, 1))
+        assertEquals("Nothing live now", I18nCore.translate(OnAirHomeLogic.subtitle(OnAirTile.EVENTS, 1234, 0)!!, 1))
     }
 
-    @Test fun onlyLiveTvIsReadyInPhase2() {
-        assertTrue(OnAirHomeLogic.isReady(OnAirTile.LIVE))
-        for (t in OnAirTile.entries - OnAirTile.LIVE) assertFalse(t.name, OnAirHomeLogic.isReady(t))
+    @Test fun liveTvOpensTheGuideTheOthersTheirNowScreen() {
+        assertTrue(OnAirHomeLogic.opensGuide(OnAirTile.LIVE))
+        for (t in OnAirTile.entries - OnAirTile.LIVE) assertFalse(t.name, OnAirHomeLogic.opensGuide(t))
     }
 
-    @Test fun liveCountOnlyWhenKnown() {
+    @Test fun countsOnlyWhenKnown() {
         assertNull(OnAirHomeLogic.subtitle(OnAirTile.LIVE, 0))
         assertEquals("7 Sender", OnAirHomeLogic.subtitle(OnAirTile.LIVE, 7))
+        assertEquals("7 Sender", OnAirHomeLogic.subtitle(OnAirTile.LIVE, 7, 3))          // Live TV keeps the channel count
+        for (t in OnAirTile.entries - OnAirTile.LIVE) assertNull(t.name, OnAirHomeLogic.subtitle(t, 7, null))   // snapshot not there yet
+        assertEquals("5 laufen gerade", OnAirHomeLogic.subtitle(OnAirTile.SPORTS, 7, 5))
     }
 
     @Test fun fiveInARowWhenTheyFitElseThreePlusTwo() {
@@ -51,7 +57,7 @@ class OnAirHomeLogicTest {
     @Test fun backReturnsWhereItCameFrom() {
         assertEquals(OnAirScreen.HOME, OnAirHomeLogic.backFrom(OnAirScreen.GUIDE, OnAirScreen.HOME))
         assertEquals(OnAirScreen.VOD, OnAirHomeLogic.backFrom(OnAirScreen.GUIDE, OnAirScreen.VOD))   // opened from IPVIO's Live TV
-        assertEquals(OnAirScreen.HOME, OnAirHomeLogic.backFrom(OnAirScreen.SOON, OnAirScreen.HOME))
+        assertEquals(OnAirScreen.HOME, OnAirHomeLogic.backFrom(OnAirScreen.NOW, OnAirScreen.HOME))
         assertEquals(OnAirScreen.HOME, OnAirHomeLogic.backFrom(OnAirScreen.VOD, OnAirScreen.HOME))
         assertEquals(OnAirScreen.HOME, OnAirHomeLogic.backFrom(OnAirScreen.HOME, OnAirScreen.HOME))
         assertEquals(OnAirScreen.VOD, OnAirHomeLogic.backFrom(OnAirScreen.DEBUG, OnAirScreen.VOD))   // debug screen → Settings

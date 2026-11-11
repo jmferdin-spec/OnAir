@@ -100,4 +100,26 @@ Programm gespeichert: {0}¦Guide stored: {0}
 Playlist und TV-Programm werden auf dem Gerät gespeichert. Beim Öffnen der App wird nichts heruntergeladen; die Aktualisierung läuft im Hintergrund nach Plan, höchstens alle 12 Stunden, solange das Gerät eingeschaltet und online ist. Nach einem Fehler wartet die App immer länger, bevor sie es erneut versucht. „Nur von Hand“ nutzt immer den gespeicherten Stand; Neu laden geht jederzeit mit dem Knopf oben. Die Uhrzeit richtet sich nach deiner Zeitzone unter „Sprache & Region“.¦Playlist and TV guide are stored on the device. Nothing is downloaded when the app opens; refreshing runs in the background on schedule, at most every 12 hours, while the device is on and online. After an error the app waits longer each time before trying again. “Manual only” always uses the saved copy; you can reload any time with the button above. The time follows your time zone under “Language & region”.
 Systemeinstellungen der App¦App system settings¦Uygulamanın sistem ayarları¦Sistemske postavke aplikacije¦Sistemske postavke aplikacije¦Sistemska podešavanja aplikacije¦Ajustes del sistema de la app¦Réglages système de l'app¦Impostazioni di sistema dell'app
 Setzt Ansicht, Design, Menü, Player, Ton und Start auf die Standardwerte. Playlists, Favoriten, Verlauf und Fortsetzen-Positionen bleiben erhalten. Zwischenspeicher leerst du unter „Speicher“.¦Resets view, design, menu, player, audio and start to defaults. Playlists, favorites, history and resume positions are kept. You clear the cache under “Storage”.¦Görünümü, tasarımı, menüyü, oynatıcıyı, sesi ve başlangıcı varsayılanlara döndürür. Playlistler, favoriler, geçmiş ve devam konumları korunur. Önbelleği “Depolama” altında temizlersiniz.¦Vraća prikaz, dizajn, izbornik, player, zvuk i pokretanje na zadane vrijednosti. Playliste, favoriti, povijest i pozicije nastavka ostaju sačuvani. Predmemoriju brišeš pod „Pohrana“.¦Vraća prikaz, dizajn, izbornik, player, zvuk i pokretanje na zadane vrijednosti. Playliste, favoriti, povijest i pozicije nastavka ostaju sačuvani. Predmemoriju brišeš pod „Pohrana“.¦Vraća prikaz, dizajn, meni, plejer, zvuk i pokretanje na zadate vrednosti. Plejliste, favoriti, istorija i pozicije nastavka ostaju sačuvani. Keš brišeš pod „Pohrana“.¦Restablece vista, diseño, menú, reproductor, audio e inicio a los valores predeterminados. Las listas, favoritos, historial y posiciones de reanudación se conservan. La caché se vacía en «Almacenamiento».¦Réinitialise affichage, design, menu, lecteur, audio et démarrage aux valeurs par défaut. Playlists, favoris, historique et positions de reprise sont conservés. Le cache se vide sous « Stockage ».¦Ripristina vista, design, menu, player, audio e avvio ai valori predefiniti. Playlist, preferiti, cronologia e posizioni di ripresa vengono mantenuti. La cache si svuota in «Archiviazione».
+# OnAir: Phase 4 – Movies, Shows, Sports, Events on now; tile counts
+{#0} laufen gerade¦{#0} on now
+Gerade nichts¦Nothing on now
+Gerade nichts live¦Nothing live now
+{0} gelaufen · noch {1}¦{0} in · {1} left
+beginnt in {0}¦starts in {0}
+{0} · {#1} bald¦{0} · {#1} soon
+{0} {#1} · {#2} bald¦{0} {#1} · {#2} soon
+Sortiert: zuletzt gestartet¦Sorted: recently started
+Sortiert: nach Sender¦Sorted: by channel
+Gerade läuft nichts, das als Film erkannt wird¦Nothing classified as a movie is airing right now
+Gerade läuft nichts, das als Serie oder Show erkannt wird¦Nothing classified as a show is airing right now
+Gerade laufen keine Sportübertragungen¦No sports on right now
+Läuft gerade¦Live now
+Gleich (nächste 60 Min.)¦Starting soon (next 60 min)
+Demnächst (24 Std.)¦Coming up (next 24 h)
+PPV-Sender¦PPV channels
+{#0} leere PPV-Plätze ausgeblendet¦{#0} empty PPV slots hidden
+Gerade keine Events¦No events right now
+Gerade keine Events – {#0} leere PPV-Plätze ausgeblendet¦No events right now – {#0} empty PPV slots hidden
+Kein Programm im Guide¦No guide data
+Quelle wählen¦Choose source
 """

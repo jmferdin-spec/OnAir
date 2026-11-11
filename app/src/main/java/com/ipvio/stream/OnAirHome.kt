@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -61,9 +62,17 @@ object OnAirNav {
     var guideList: List<Item>? = null
     var guideKey: String? = null
 
+    /** Phase 4: card focused last on a "now" screen (focus returns there after the player), per tile. */
+    val nowFocus = HashMap<OnAirTile, String>()
+    /** Sports: the selected sport group. */
+    var sport: Sport? = null
+    /** Movies / Shows sort order (toggle on the screen). */
+    var sort by mutableStateOf(NowScreenLogic.Sort.RECENT)
+
     fun openTile(t: OnAirTile) {
         tile = t
-        if (OnAirHomeLogic.isReady(t)) openGuide(OnAirScreen.HOME) else { openedFrom = OnAirScreen.HOME; screen = OnAirScreen.SOON }
+        if (OnAirHomeLogic.opensGuide(t)) openGuide(OnAirScreen.HOME)
+        else { nowFocus.remove(t); openedFrom = OnAirScreen.HOME; screen = OnAirScreen.NOW }
     }
 
     fun openGuide(from: OnAirScreen, list: List<Item>? = null, key: String? = null) {
@@ -86,7 +95,7 @@ object OnAirNav {
     fun home() { guideList = null; guideKey = null; openedFrom = OnAirScreen.HOME; screen = OnAirScreen.HOME }
 }
 
-private fun tileIcon(t: OnAirTile): Int = when (t) {
+internal fun tileIcon(t: OnAirTile): Int = when (t) {
     OnAirTile.LIVE -> R.drawable.ic_tile_live
     OnAirTile.MOVIES -> R.drawable.ic_tile_movies
     OnAirTile.SHOWS -> R.drawable.ic_tile_shows
@@ -95,7 +104,7 @@ private fun tileIcon(t: OnAirTile): Int = when (t) {
 }
 
 /** Asks [req] for focus a few times – lists and rows sometimes need a frame or two before the target exists. */
-private suspend fun focusSoon(req: FocusRequester) {
+internal suspend fun focusSoon(req: FocusRequester) {
     delay(40)
     repeat(12) {
         if (runCatching { req.requestFocus() }.getOrDefault(false)) return
@@ -109,7 +118,7 @@ private suspend fun focusSoon(req: FocusRequester) {
  */
 @Composable
 fun OnAirHomeScreen(
-    liveCount: Int,
+    live: List<Item>,
     focusTile: OnAirTile,
     onTile: (OnAirTile) -> Unit,
     onOnDemand: () -> Unit,
@@ -118,8 +127,20 @@ fun OnAirHomeScreen(
     onRetry: () -> Unit
 ) {
     val ctx = LocalContext.current
+    val liveCount = live.size
     val reqs = remember { OnAirTile.entries.associateWith { FocusRequester() } }
     LaunchedEffect(focusTile) { focusSoon(reqs.getValue(focusTile)) }
+
+    // Phase 4: live counts on the tiles – the tiles show at once, the counts follow from the (cached) on-now snapshot.
+    // Also the lightweight Events refresh (PPV names; gated: at most every 30 min).
+    val snap by produceState<OnNow.Snapshot?>(null, live) {
+        if (live.isEmpty()) return@produceState
+        EventRefresh.maybe(ctx, live)
+        while (true) {
+            value = OnNow.snapshot(ctx, live)
+            delay(OnNow.TTL_MS)
+        }
+    }
 
     // Back: leave the app – twice within 2.5 s when IPVIO's "confirm exit" setting is on (default)
     var lastBack by remember { mutableLongStateOf(0L) }
@@ -161,7 +182,8 @@ fun OnAirHomeScreen(
                 for (row in OnAirHomeLogic.rows(cols)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
                         for (t in row) {
-                            HomeTile(t, OnAirHomeLogic.subtitle(t, liveCount), reqs.getValue(t), Modifier.weight(1f)) { onTile(t) }
+                            val n = snap?.let { NowScreenLogic.tileCount(t, it.items, nowSec) }
+                            HomeTile(t, OnAirHomeLogic.subtitle(t, liveCount, n), reqs.getValue(t), Modifier.weight(1f)) { onTile(t) }
                         }
                         // second row of a 3 + 2 layout: same tile width as above
                         repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
@@ -212,29 +234,6 @@ private fun HomeTile(t: OnAirTile, subtitle: String?, req: FocusRequester, modif
                 subtitle, color = if (focused) OnAccent.copy(alpha = 0.85f) else Muted, fontSize = 15.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
-        }
-    }
-}
-
-/** Movies, Shows, Sports and Events until Phase 4: what is coming, Back to the home screen, or the TV guide meanwhile. */
-@Composable
-fun PhasePlaceholder(tile: OnAirTile, onBack: () -> Unit, onGuide: () -> Unit) {
-    val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focusSoon(first) }
-    BackHandler { onBack() }
-    Box(Modifier.fillMaxSize().background(Bg), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.widthIn(max = 640.dp)) {
-            Image(painterResource(tileIcon(tile)), contentDescription = null, modifier = Modifier.size(72.dp), colorFilter = ColorFilter.tint(Accent2))
-            Text(tile.label, color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
-            Text("Kommt in Phase 4", color = Accent2, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                "Hier siehst du bald, was gerade läuft – mit Sender, Fortschritt und direkt zum Ansehen.",
-                color = Muted, fontSize = 16.sp, textAlign = TextAlign.Center
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
-                PillButton("Zurück", modifier = Modifier.focusRequester(first), light = true) { onBack() }
-                PillButton("TV-Guide öffnen", icon = AIcon.Grid) { onGuide() }
-            }
         }
     }
 }

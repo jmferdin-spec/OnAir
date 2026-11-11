@@ -20,7 +20,11 @@ object OnNow {
     const val TTL_MS = 60_000L
 
     /** Everything the "now" screens need at one moment. [at] = Unix seconds the snapshot was computed for. */
-    class Snapshot(val at: Long, val items: List<OnNowItem>, val events: OnNowLogic.Events, val ms: Long, val stages: String = "")
+    /** [soon] = programmes starting within the next hour on any channel (Sports "Starting soon"). */
+    class Snapshot(
+        val at: Long, val items: List<OnNowItem>, val events: OnNowLogic.Events, val ms: Long, val stages: String = "",
+        val soon: List<OnNowItem> = emptyList()
+    )
 
     private val lock = Mutex()
     @Volatile private var cached: Snapshot? = null
@@ -109,7 +113,11 @@ object OnNow {
         t.lap("db next (${next.size})")
         val events = OnNowLogic.events(items, next, idx.events, now)
         t.lap("events")
-        return Snapshot(now, items, events, System.currentTimeMillis() - nowMs, t.toString())
+        // Sports "Starting soon": everything that starts within the next hour (one indexed range query, ~1 row per channel)
+        val soonProgs = runCatching { GuideDb.startingBetween(c, now + 1, now + 3600L) }.getOrDefault(emptyList())
+        val soon = OnNowLogic.upcoming(soonProgs, idx.byTvg, now, hours = 1)
+        t.lap("soon (${soonProgs.size})")
+        return Snapshot(now, items, events, System.currentTimeMillis() - nowMs, t.toString(), soon)
     }
 
     /** Wall-clock time per stage, for the debug screen and the log. */
