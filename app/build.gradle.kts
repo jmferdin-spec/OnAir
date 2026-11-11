@@ -58,6 +58,13 @@ android {
                 keepRules { files.add(file("proguard-rules.pro")) }
             }
         }
+        // OnAir: day-to-day TV testing – the release build without R8 (minutes faster). Same applicationId and release
+        // signing, so it installs over the release build and keeps the login and data. Not for publishing: R8 problems only
+        // show in the real release build (check that on the TV before tagging).
+        create("staging") {
+            initWith(getByName("release"))
+            optimization { enable = false }
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -94,3 +101,6 @@ dependencies {
     // Real org.json for JVM unit tests (Android's copy is only a stub there); used by XtreamApiLogicTest
     testImplementation("org.json:json:20240303")
 }
+
+// OnAir: the release lint check ("lint vital", ~2.5 min) runs for release only, not for the staging test build
+tasks.matching { it.name.startsWith("lintVital") && it.name.contains("Staging") }.configureEach { enabled = false }

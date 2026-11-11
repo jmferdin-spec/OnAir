@@ -204,6 +204,16 @@ Since v1.0 the TV runs the **release** build. Debug and release are signed with 
 adb -s <onn-4k-plus-ip>:5555 install -r app/build/outputs/apk/release/app-release.apk
 ```
 
+### Day-to-day testing: the `staging` build (owner, 2026-11-11)
+
+- **Use `staging` for day-to-day TV testing:** the release build without R8 (and without the release lint check) – same `com.onair.tv` and release signing, so it installs over the release build and keeps the login and data. A one-file change builds in ~40 s instead of ~100 s.
+  ```
+  ./gradlew assembleStaging
+  adb -s <onn-4k-plus-ip>:5555 install -r app/build/outputs/apk/staging/app-staging.apk
+  ```
+- **Always build and check a `release` build on the TV before tagging** (launch it, watch `adb logcat` for `FATAL`): R8 problems only show there (v1.0 had two R8 crashes at launch).
+- Build machine: 7.7 GB RAM – `gradle.properties` gives the Gradle daemon 3 GB and caps the Kotlin daemon at 1.5 GB; build cache and configuration cache are on. The PC must not sleep during a build (a 45-minute "build" in v2 was the laptop in standby); the owner set sleep to 30 min when plugged in. Defender exclusions were proposed but not added.
+
 ## v2 — plan (2026-11-11)
 
 Two features: a **force guide update** button and **Multiview** (two live channels at once, like TiviMate). Same ground rules as v1: small verifiable phases, pure logic in `*Logic.kt` with tests, every provider call through `ProviderGuard` / `RefreshLogic`, release build verified on the TV before tagging.
