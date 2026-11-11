@@ -306,8 +306,11 @@ object Xmltv {
                 status = "Programm wird eingelesen …"
                 val t0 = System.currentTimeMillis()
                 try {
-                    val rows = GuideDb.replaceAll(app, sig) { sink -> for (f in files) parseInto(f, wanted, past, now, sink, active) }
-                    LoginDebug.info("guide import: $rows programmes in ${System.currentTimeMillis() - t0} ms")
+                    val offsets = GuideLogic.OffsetTally()
+                    val rows = GuideDb.replaceAll(app, sig, { mapOf("offsets" to offsets.encode()) }) { sink ->
+                        for (f in files) parseInto(f, wanted, past, now, sink, active, offsets)
+                    }
+                    LoginDebug.info("guide import: $rows programmes in ${System.currentTimeMillis() - t0} ms, start-time offsets ${offsets.encode()}")
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -331,7 +334,10 @@ object Xmltv {
      * OnAir Phase 3: streams one stored guide file into the database import ([sink]). Keeps what [GuideLogic.keep] allows for
      * wanted channels, with sub-title, categories and episode number. Nothing is collected in memory.
      */
-    private fun parseInto(f: File, wanted: Set<String>, past: Map<String, Int>, now: Long, sink: GuideDb.Sink, active: () -> Boolean) {
+    private fun parseInto(
+        f: File, wanted: Set<String>, past: Map<String, Int>, now: Long, sink: GuideDb.Sink, active: () -> Boolean,
+        offsets: GuideLogic.OffsetTally? = null
+    ) {
         openStored(f).use { ins ->
             val p = Xml.newPullParser()
             p.setInput(ins, null)
@@ -342,7 +348,8 @@ object Xmltv {
             while (ev != XmlPullParser.END_DOCUMENT) {
                 if (ev == XmlPullParser.START_TAG && p.name == "programme") {
                     val ch = p.getAttributeValue(null, "channel")?.trim()?.lowercase()
-                    val s = parseTime(p.getAttributeValue(null, "start"))
+                    val rawStart = p.getAttributeValue(null, "start")
+                    val s = parseTime(rawStart)
                     val e = parseTime(p.getAttributeValue(null, "stop"))
                     // Channels nobody can see: skip the whole element without reading its texts
                     if (ch == null || ch !in wanted || s == null || e == null) {
@@ -365,6 +372,7 @@ object Xmltv {
                         }
                         if (title.isNotEmpty() && epgSane(s, e) && GuideLogic.keep(s, e, now, past[ch] ?: 0)) {
                             sink.add(ch, s, e, title, sub, GuideLogic.shortDesc(desc), GuideLogic.joinCategories(cats), GuideLogic.episode(eps))
+                            offsets?.add(rawStart)
                         }
                     }
                     if (++seen % 5000 == 0 && !active()) throw kotlinx.coroutines.CancellationException("abgebrochen")

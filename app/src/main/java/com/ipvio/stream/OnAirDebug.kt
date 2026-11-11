@@ -44,7 +44,7 @@ import kotlinx.coroutines.withContext
 private class DebugData(
     val importedAt: Long, val rows: Int, val withCats: Int, val withEpisode: Int, val withSub: Int,
     val guideChannels: Int, val live: Int, val liveWithTvg: Int, val liveWithGuide: Int,
-    val storedAt: Long, val status: String, val snap: OnNow.Snapshot,
+    val storedAt: Long, val status: String, val snap: OnNow.Snapshot, val offsets: String?,
     val byClass: Map<OnNowClass, Int>, val bySport: Map<Sport, Int>,
     val other: List<OnNowItem>, val sports: List<OnNowItem>, val otherSports: List<OnNowItem>
 )
@@ -69,6 +69,7 @@ private suspend fun computeDebug(c: Context, liveAll: List<Item>, force: Boolean
             importedAt = info?.importedAt ?: 0L, rows = rows, withCats = cov[0], withEpisode = cov[1], withSub = cov[2],
             guideChannels = Xmltv.channelCount, live = live.size, liveWithTvg = live.count { !it.tvgId.isNullOrBlank() },
             liveWithGuide = live.count { Xmltv.has(it.tvgId) }, storedAt = Xmltv.storedAt, status = Xmltv.status, snap = snap,
+            offsets = runCatching { GuideDb.meta(c, "offsets") }.getOrNull(),
             byClass = OnNowLogic.countByClass(items), bySport = OnNowLogic.countBySport(items),
             other = spread(items.filter { it.cls == OnNowClass.OTHER }, 20),
             sports = spread(sports, 20),
@@ -120,6 +121,14 @@ fun OnAirDebugScreen(liveAll: List<Item>, onBack: () -> Unit) {
             DebugLine(
                 "XMLTV fields: category ${pct(d.withCats, d.rows)}   ·   episode-num ${pct(d.withEpisode, d.rows)}   ·   sub-title ${pct(d.withSub, d.rows)}",
                 "Classification uses titles, Xtream category and channel name when these are empty."
+            )
+        }
+        item {
+            val z = General.zone()
+            DebugLine(
+                "Guide time offsets (start times): ${GuideLogic.describeOffsets(GuideLogic.decodeOffsets(d.offsets))}",
+                "Stored as UTC, shown in the app time zone ${z.id} (now ${GuideLogic.formatOffset(z.getOffset(System.currentTimeMillis()) / 1000)})" +
+                    (if (d.offsets == null) "   ·   recorded on the next guide import" else "")
             )
         }
         item { DebugLine("XMLTV file downloaded: ${stamp(d.storedAt)}   ·   status: ${Lang.tr(d.status)}") }

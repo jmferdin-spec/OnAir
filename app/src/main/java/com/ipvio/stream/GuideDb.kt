@@ -69,7 +69,7 @@ object GuideDb {
      * ignored (first one wins, e.g. the provider's guide before a custom one). Everything happens in one transaction – an
      * exception or cancellation inside [fill] leaves the old guide untouched. Returns the number of rows stored.
      */
-    fun replaceAll(c: Context, sig: String, fill: (Sink) -> Unit): Int {
+    fun replaceAll(c: Context, sig: String, extraMeta: () -> Map<String, String> = { emptyMap() }, fill: (Sink) -> Unit): Int {
         val db = db(c)
         db.beginTransaction()
         try {
@@ -99,6 +99,7 @@ object GuideDb {
             putMeta(db, "sig", sig)
             putMeta(db, "rows", rows.toString())
             putMeta(db, "imported_at", System.currentTimeMillis().toString())
+            for ((k, v) in extraMeta()) putMeta(db, k, v)
             db.setTransactionSuccessful()
             return rows
         } finally {

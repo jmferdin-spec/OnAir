@@ -6,7 +6,7 @@ package com.ipvio.stream
  */
 object GuideLogic {
     /** Bump when the stored columns or the import rules change: forces a re-import from the stored XMLTV files. */
-    const val SCHEMA = 1
+    const val SCHEMA = 2   // 2: import also records the UTC offsets of the start times (debug screen)
 
     /** Window kept for every channel: now − 3 h … now + 36 h. */
     const val PAST_S = 3 * 3600L
@@ -85,6 +85,53 @@ object GuideLogic {
         clean.firstOrNull { it.first == "onscreen" }?.let { fromOnscreen(it.second)?.let { e -> return e } }
         clean.firstOrNull { it.first == "dd_progid" }?.let { if (it.second.uppercase().startsWith("EP")) return it.second.take(32) }
         return clean.firstOrNull { it.first != "xmltv_ns" && it.first != "onscreen" && it.first != "dd_progid" }?.second?.take(32)
+    }
+
+    // ------------------------------------------------------------------ time offsets (debug screen)
+
+    const val NO_OFFSET = "none"
+    const val BAD_OFFSET = "invalid"
+
+    /**
+     * UTC offset of an XMLTV time ("20261111200000 -0500" → "-0500"), [NO_OFFSET] if it has none (read as UTC, see
+     * [xmltvTime]) or [BAD_OFFSET] if the time itself can't be read. Times are stored as UTC seconds; the offset only shows
+     * which zone the provider wrote them in.
+     */
+    fun offsetOf(raw: String?): String {
+        val t = raw?.trim() ?: return BAD_OFFSET
+        if (xmltvTime(t) == null) return BAD_OFFSET
+        val rest = t.substring(14).trim()
+        if (rest.length >= 5 && (rest[0] == '+' || rest[0] == '-') && rest.substring(1, 5).all { it in '0'..'9' }) return rest.substring(0, 5)
+        return NO_OFFSET
+    }
+
+    /** Offset in seconds as "+HHMM" / "-HHMM" (e.g. the app's time zone right now). */
+    fun formatOffset(sec: Int): String {
+        val a = kotlin.math.abs(sec) / 60
+        return String.format(java.util.Locale.ROOT, "%s%02d%02d", if (sec < 0) "-" else "+", a / 60, a % 60)
+    }
+
+    /** Counts per offset during an import; stored as "-0500:29131,none:3" (most frequent first). */
+    class OffsetTally {
+        private val m = HashMap<String, Int>()
+        fun add(raw: String?) { val k = offsetOf(raw); m[k] = (m[k] ?: 0) + 1 }
+        fun counts(): Map<String, Int> = m
+        fun encode(): String = encodeOffsets(m)
+    }
+
+    fun encodeOffsets(m: Map<String, Int>): String =
+        m.entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key }).joinToString(",") { "${it.key}:${it.value}" }
+
+    fun decodeOffsets(s: String?): List<Pair<String, Int>> =
+        s.orEmpty().split(',').mapNotNull { p ->
+            val i = p.lastIndexOf(':'); if (i <= 0) null else p.substring(i + 1).toIntOrNull()?.let { p.substring(0, i) to it }
+        }
+
+    /** "-0500 100.0 %" / "-0500 97.0 % · none 3.0 %"; "–" when nothing was recorded (guide imported before this existed). */
+    fun describeOffsets(list: List<Pair<String, Int>>): String {
+        val total = list.sumOf { it.second }
+        if (total <= 0) return "–"
+        return list.joinToString("   ·   ") { (k, n) -> String.format(java.util.Locale.ROOT, "%s %.1f %%", k, n * 100.0 / total) }
     }
 
     // ------------------------------------------------------------------ when to import

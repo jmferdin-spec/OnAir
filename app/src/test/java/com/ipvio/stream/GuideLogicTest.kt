@@ -84,4 +84,45 @@ class GuideLogicTest {
         assertNotEquals(a, GuideLogic.signature(files, setOf("a.us"), mapOf("a.us" to 2)))
         assertNotEquals(a, GuideLogic.signature(files, setOf("a.us", "b.us"), mapOf("a.us" to 3)))
     }
+
+    // ------------------------------------------------------------------ time offsets
+
+    @Test fun offsetOfReadsTheZoneOfTheStartTime() {
+        assertEquals("-0500", GuideLogic.offsetOf("20261111200000 -0500"))
+        assertEquals("+0530", GuideLogic.offsetOf("20261111200000 +0530"))
+        assertEquals("+0000", GuideLogic.offsetOf(" 20261111200000 +0000 "))
+        assertEquals(GuideLogic.NO_OFFSET, GuideLogic.offsetOf("20261111200000"))
+        assertEquals(GuideLogic.BAD_OFFSET, GuideLogic.offsetOf("2026-11-11 20:00"))
+        assertEquals(GuideLogic.BAD_OFFSET, GuideLogic.offsetOf(null))
+    }
+
+    @Test fun minusFiveHoursIsConvertedToUtc() {
+        // 20:00 at -0500 is 01:00 UTC the next day – the owner's guide uses -0500 throughout
+        assertEquals(xmltvTime("20261112010000 +0000"), xmltvTime("20261111200000 -0500"))
+        assertEquals(xmltvTime("20261112010000"), xmltvTime("20261111200000 -0500"))
+        assertEquals(5 * 3600L, xmltvTime("20261111200000 -0500")!! - xmltvTime("20261111200000 +0000")!!)
+    }
+
+    @Test fun formatOffset() {
+        assertEquals("-0600", GuideLogic.formatOffset(-6 * 3600))
+        assertEquals("+0530", GuideLogic.formatOffset(5 * 3600 + 30 * 60))
+        assertEquals("+0000", GuideLogic.formatOffset(0))
+    }
+
+    @Test fun tallyEncodesMostFrequentFirstAndRoundTrips() {
+        val t = GuideLogic.OffsetTally()
+        repeat(97) { t.add("20261111200000 -0500") }
+        repeat(3) { t.add("20261111200000") }
+        t.add("garbage")
+        assertEquals("-0500:97,none:3,invalid:1", t.encode())
+        val back = GuideLogic.decodeOffsets(t.encode())
+        assertEquals(listOf("-0500" to 97, "none" to 3, "invalid" to 1), back)
+        assertEquals("-0500 96.0 %   ·   none 3.0 %   ·   invalid 1.0 %", GuideLogic.describeOffsets(back))
+    }
+
+    @Test fun describeWithoutDataIsADash() {
+        assertEquals("–", GuideLogic.describeOffsets(GuideLogic.decodeOffsets(null)))
+        assertEquals("–", GuideLogic.describeOffsets(GuideLogic.decodeOffsets("")))
+        assertEquals("-0500 100.0 %", GuideLogic.describeOffsets(GuideLogic.decodeOffsets("-0500:29131")))
+    }
 }
