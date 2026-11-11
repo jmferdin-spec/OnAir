@@ -180,4 +180,31 @@ class RefreshLogicTest {
         assertTrue(RefreshLogic.IN_RUN_RETRY_MS.all { it >= 5_000L })
         assertTrue(RefreshLogic.IN_RUN_RETRY_MS.zipWithNext().all { (a, b) -> b > a })
     }
+
+    // ------------------------------------------------------------------ OnAir: lightweight Events refresh
+
+    @Test fun events_refresh_at_most_every_30_minutes() {
+        // never asked before: at once
+        assertTrue(RefreshLogic.allowed(State(), now, Trigger.EVENTS, hasCache = true))
+        // asked 10 min ago: not yet, then 30 min after that attempt
+        val asked = State(lastSuccess = now - 10 * MIN, lastAttempt = now - 10 * MIN)
+        assertFalse(RefreshLogic.allowed(asked, now, Trigger.EVENTS, hasCache = true))
+        assertEquals(now + 20 * MIN, RefreshLogic.nextAllowedAt(asked, now, Trigger.EVENTS, hasCache = true))
+        assertTrue(RefreshLogic.allowed(asked, now + 20 * MIN, Trigger.EVENTS, hasCache = true))
+        // a full catalog succeeded 2 h ago does not hold it back (separate gate key; only its own attempts count)
+        assertTrue(RefreshLogic.allowed(fresh, now, Trigger.EVENTS, hasCache = true))
+    }
+
+    @Test fun events_refresh_uses_the_normal_backoff_and_cooldown() {
+        // 3 failures in a row: backoff 1 h is longer than the 30 min interval
+        val failing = State(lastSuccess = now - 5 * HOUR, lastAttempt = now - 40 * MIN, failures = 3)
+        assertFalse(RefreshLogic.allowed(failing, now, Trigger.EVENTS, hasCache = true))
+        assertEquals(now + 20 * MIN, RefreshLogic.nextAllowedAt(failing, now, Trigger.EVENTS, hasCache = true))
+        // the provider asked us to wait
+        val cooling = State(lastAttempt = now - 2 * HOUR, cooldownUntil = now + 45 * MIN)
+        assertEquals(now + 45 * MIN, RefreshLogic.nextAllowedAt(cooling, now, Trigger.EVENTS, hasCache = true))
+        // nothing cached: the Events refresh never stands in for the first catalog download
+        assertNull(RefreshLogic.nextAllowedAt(State(), now, Trigger.EVENTS, hasCache = false))
+        assertEquals(30 * MIN, RefreshLogic.EVENTS_INTERVAL_MS)
+    }
 }

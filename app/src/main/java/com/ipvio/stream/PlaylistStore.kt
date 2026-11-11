@@ -61,10 +61,27 @@ object PlaylistStore {
      * Neue Liste übernehmen. [shown] = schon nach Jugendschutz gefiltert (im Hintergrund berechnet), sonst wird es hier gemacht –
      * so muss das Filtern (Regex über alle Titel) nicht beim Zeichnen im Hauptthread passieren.
      */
-    private fun setItems(l: List<Item>, shown: List<Item>? = null) {
+    private fun setItems(l0: List<Item>, shown: List<Item>? = null) {
         LibMatch.reset()
-        filtered = shown ?: shownOf(l); filteredFor = l; filteredVer = filterVer()
+        // OnAir: newer PPV / event channel names from the Events refresh, on top of the cached catalog
+        val l = EventNames.apply(l0)
+        filtered = (if (l === l0) shown else null) ?: shownOf(l); filteredFor = l; filteredVer = filterVer()
         rawChannels = l
+    }
+
+    /**
+     * OnAir: the Events refresh found new channel names ([names] = item id → name): store them and show them at once.
+     * If a playlist load is running it applies them itself when it finishes (setItems).
+     */
+    suspend fun applyEventNames(c: Context, names: Map<String, String>) {
+        EventNames.put(c, names)
+        if (!loadLock.tryLock()) return
+        try {
+            val cur = rawChannels
+            if (cur.isNotEmpty()) withContext(Dispatchers.Default) { EventNames.apply(cur) }.let { if (it !== cur) setItems(it) }
+        } finally {
+            loadLock.unlock()
+        }
     }
 
     /** Stand der Filter (Jugendschutz, „gestörte Titel ausblenden“): ändert er sich, wird die gezeigte Liste neu gebildet. */
@@ -143,7 +160,8 @@ object PlaylistStore {
     @Volatile private var apiOrder: Pair<Int, Map<String, Int>>? = null
 
     private val XTREAM = Regex("""^(https?://[^/]+)/get\.php\?.*?username=([^&]+).*?password=([^&]+)""")
-    private const val UA = "IPVIOStream/1.0"
+    /** User-Agent for provider requests (unchanged from IPVIO – it works with the owner's provider). */
+    internal const val UA = "IPVIOStream/1.0"
     /** Eine fertig heruntergeladene, aber noch nicht eingelesene Liste wird so lange wiederverwendet. */
     private const val RAW_MAX_AGE = 12 * 3_600_000L
     /** Freier Platz, der nach dem Download mindestens bleiben soll. */
@@ -198,6 +216,7 @@ object PlaylistStore {
     private fun ensure(c: Context) {
         if (inited) return
         inited = true
+        EventNames.load(c)
         cleanupStale(c)
         val p = prefs(c)
         // Bevorzugt die verschlüsselte Fassung; die alte Klartext-Fassung wird beim ersten Start übernommen und ersetzt.
@@ -858,6 +877,7 @@ object PlaylistStore {
                 val (src, cs) = downloadWithRetry(c, u)
                 fetched = true
                 RefreshGate.succeeded(c, gateKey)
+                EventNames.clear(c)   // OnAir: the full catalog brings the current event names itself
                 val gzTmp = tmp(gzFile(c, u))
                 val b = build(c, src, false, cs, ask, gzTmp, forceAsk)
                 val parsed = b.parsed
@@ -971,6 +991,7 @@ object PlaylistStore {
                     val (src, cs) = downloadWithRetry(c, u)
                     fetched = true
                     RefreshGate.succeeded(c, gateKey)
+                    EventNames.clear(c)   // OnAir: the full catalog brings the current event names itself
                     val gzTmp = tmp(gzFile(c, u))
                     val b = build(c, src, false, cs, false, gzTmp)
                     if (b.parsed.counts.isEmpty()) return@withContext false

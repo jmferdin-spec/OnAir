@@ -50,8 +50,16 @@ object RefreshLogic {
         /** Background schedule (WorkManager). */
         SCHEDULED,
         /** The owner pressed a button (login, reload). */
-        MANUAL
+        MANUAL,
+        /**
+         * OnAir: lightweight Events refresh (get_live_streams for the PPV categories only) when the home or Events screen
+         * opens: at most every [EVENTS_INTERVAL_MS] after the last attempt, with the normal backoff after failures.
+         */
+        EVENTS
     }
+
+    /** The Events refresh runs at most this often. */
+    const val EVENTS_INTERVAL_MS = 30 * MIN
 
     fun backoffMs(failures: Int): Long = if (failures <= 0) 0L else BACKOFF_MS[(failures - 1).coerceAtMost(BACKOFF_MS.lastIndex)]
 
@@ -82,6 +90,7 @@ object RefreshLogic {
             Trigger.MANUAL -> if (s.lastAttempt > 0L) s.lastAttempt + MANUAL_DEBOUNCE_MS else 0L
             Trigger.AUTO -> if (hasCache) return null else backoffEnd(s)
             Trigger.SCHEDULED -> maxOf(backoffEnd(s), if (hasCache && s.lastSuccess > 0L) s.lastSuccess + MIN_INTERVAL_MS else 0L)
+            Trigger.EVENTS -> if (!hasCache) return null else maxOf(backoffEnd(s), if (s.lastAttempt > 0L) s.lastAttempt + EVENTS_INTERVAL_MS else 0L)
         }
         return maxOf(t, s.cooldownUntil, now)
     }
