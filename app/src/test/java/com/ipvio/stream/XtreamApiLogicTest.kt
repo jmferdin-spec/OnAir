@@ -71,6 +71,29 @@ class XtreamApiLogicTest {
         assertTrue(XtreamApiLogic.categoryOrder(emptyList(), emptyList(), emptyList()).isEmpty())
     }
 
+    /** OnAir: Sports/Events detection reads the exact category name and id – nothing may be lost on the way. */
+    @Test fun categoryNameAndIdSurviveForTrickyNames() {
+        val tricky = mapOf(
+            "41" to "ES| DEPORTES (FÚTBOL) | Liga MX",
+            "42" to "PPV: UFC, Boxing & WWE",
+            "43" to "US | NFL 4K ⚡ #1",
+            "44" to "Say \"PPV\" Events"
+        )
+        val text = "#EXTM3U\n" + tricky.keys.joinToString("") { id ->
+            XtreamApiLogic.liveEntry(mapOf("stream_id" to "9$id", "name" to "Channel $id", "category_id" to id), tricky, a, "ts")!!
+        }
+        val live = M3uParser.parseLines(text.lineSequence()).items
+        assertEquals(tricky.keys.toList(), live.map { it.catId })
+        assertEquals(
+            listOf("ES| DEPORTES (FÚTBOL) | Liga MX", "PPV: UFC, Boxing & WWE", "US | NFL 4K ⚡ #1", "Say 'PPV' Events"),
+            live.map { it.group }
+        )
+        // Unknown id: the category_name field of the stream is used, the id is still kept
+        val unknown = XtreamApiLogic.liveEntry(mapOf("stream_id" to "1", "name" to "X", "category_id" to "99", "category_name" to "EVENTS"), tricky, a, "ts")!!
+        val u = M3uParser.parseLines(("#EXTM3U\n" + unknown).lineSequence()).items.single()
+        assertEquals("EVENTS", u.group); assertEquals("99", u.catId)
+    }
+
     @Test fun liveEntryLine() {
         val s = XtreamApiLogic.liveEntry(mapOf("stream_id" to "101", "name" to "US: Sports Net HD", "epg_channel_id" to "sportsnet.us",
             "stream_icon" to "http://img.test/s.png", "category_id" to "5", "tv_archive" to "1", "tv_archive_duration" to "3"), cats, a, "ts")!!
@@ -113,6 +136,8 @@ class XtreamApiLogicTest {
         assertEquals("US| SPORTS", live[0].group)
         assertEquals("sn.us", live[0].tvgId)
         assertEquals("US| MOVIE CHANNELS", live[1].group)
+        // OnAir: category name and category_id both survive player_api → M3U → parser
+        assertEquals(listOf("5", "9"), live.map { it.catId })
         val movie = p.items.single { it.kind == Kind.MOVIE }
         assertEquals("Quiet Harbor", movie.title); assertEquals(2019, movie.year)
         val show = p.items.single { it.kind == Kind.SERIES }

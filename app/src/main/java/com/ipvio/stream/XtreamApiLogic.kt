@@ -20,6 +20,11 @@ object XtreamApiLogic {
     const val SERIES_EXT = "onairseries"
     private const val SEP = "\u0001"
     const val NO_GROUP = "Sonstige"
+    /**
+     * M3U attribute carrying a live channel's Xtream category_id next to its category name (group-title).
+     * Sports/Events detection relies on both; the parser keeps it in [Item.catId].
+     */
+    const val CAT_ATTR = "xc-category-id"
 
     private val GET_PHP = Regex("""^(https?://[^/?#]+)/get\.php\?(.*)$""", RegexOption.IGNORE_CASE)
     private val REF = Regex("""^(https?://[^/]+)/series/([^/]+)/([^/]+)/([^/.#]+)\.$SERIES_EXT(?:#(.*))?$""")
@@ -116,7 +121,7 @@ object XtreamApiLogic {
         val days = clean(f["tv_archive_duration"])?.toIntOrNull()?.takeIf { it > 0 }
         val attrs = mutableListOf<Pair<String, String?>>(
             "tvg-id" to clean(f["epg_channel_id"]), "tvg-name" to n, "tvg-logo" to clean(f["stream_icon"]),
-            "group-title" to group(f, cats)
+            "group-title" to group(f, cats), CAT_ATTR to clean(f["category_id"])
         )
         if (archive && days != null) { attrs += "catchup" to "xc"; attrs += "catchup-days" to days.toString() }
         return extinf(attrs, n) + "\n" + streamUrl(a, "live", id, ext) + "\n"

@@ -59,12 +59,12 @@ object PhoneImportLogic {
     fun page(li: Int): String {
         fun t(a: String, b: String) = tr(li, a, b)
         return """<!doctype html><html lang="${I18nCore.CODES.getOrElse(li) { "en" }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>IPVIO Stream</title><style>
+<title>OnAir</title><style>
 body{font-family:system-ui,sans-serif;background:#0B0F19;color:#fff;margin:0;padding:20px;max-width:560px}
 h1{font-size:22px}h2{font-size:16px;color:#9aa;margin-top:28px}
 input,textarea{width:100%;box-sizing:border-box;padding:14px;margin:6px 0;border-radius:10px;border:1px solid #333;background:#171a26;color:#fff;font-size:16px}
-button{width:100%;padding:14px;margin-top:10px;border:0;border-radius:10px;background:#4ADE80;color:#0B0F19;font-size:17px;font-weight:700}
-</style></head><body><h1>IPVIO Stream</h1>
+button{width:100%;padding:14px;margin-top:10px;border:0;border-radius:10px;background:#D32F2F;color:#FFFFFF;font-size:17px;font-weight:700}
+</style></head><body><h1>OnAir</h1>
 <p>${t("Sende deine Playlist an den Fernseher. Den Code siehst du auf dem Bildschirm.", "Send your playlist to the TV. You can see the code on the screen.")}</p>
 <form method="post" action="/send"><h2>${t("M3U-Link", "M3U link")}</h2>
 <input name="code" inputmode="numeric" maxlength="4" placeholder="${t("Code vom Fernseher", "Code from the TV")}" required>

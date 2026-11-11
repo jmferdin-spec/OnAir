@@ -90,8 +90,14 @@ http://h/x
     }
 
     @Test fun farben_firmenfarbenSindStandard() {
-        assertEquals(Look.BRAND_GREEN, Look.ACCENTS[0].fill)
+        // OnAir: red on navy is the default; white text on the red fill, the red highlight readable on navy
+        assertEquals(Look.BRAND_RED, Look.ACCENTS[0].fill)
         assertEquals(0x0B0F19, Look.BGS[0].bg)
+        assertEquals(0xFFFFFF, ThemeMath.onAccent(Look.BRAND_RED))
+        assertTrue(ThemeMath.contrast(0xFFFFFF, Look.BRAND_RED) >= 4.5)
+        assertTrue(ThemeMath.contrast(Look.BRAND_RED_HI, 0x0B0F19) >= 4.5)
+        for (bg in Look.BGS) assertTrue(bg.name, ThemeMath.contrast(Look.BRAND_RED_HI, bg.bg) >= 4.5)
+        // upstream green remains available as a preset (checks below still apply)
         // Neon-Grün bekommt dunkle Schrift, dunkle Flächen weiterhin weiße
         assertEquals(ThemeMath.INK, ThemeMath.onAccent(Look.BRAND_GREEN))
         assertEquals(0xFFFFFF, ThemeMath.onAccent(0x7C5CFF))

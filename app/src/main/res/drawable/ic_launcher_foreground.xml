@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- IPVIO-Logo (Bild ic_logo_fg.png) für das adaptive App-Symbol -->
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@drawable/ic_logo_fg"
-    android:gravity="fill" />
+<!-- OnAir launcher mark: white TV outline with a red "live" dot, inside the 66dp safe zone of the 108dp adaptive icon -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- screen -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.5"
+        android:strokeLineJoin="round"
+        android:pathData="M36,35H72A5,5 0,0 1,77 40V62A5,5 0,0 1,72 67H36A5,5 0,0 1,31 62V40A5,5 0,0 1,36 35Z" />
+    <!-- stand -->
+    <path android:fillColor="#FFFFFF" android:pathData="M51.5,67h5v7.5h-5z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M43.75,73.5H64.25A1.75,1.75 0,0 1,66 75.25V75.75A1.75,1.75 0,0 1,64.25 77.5H43.75A1.75,1.75 0,0 1,42 75.75V75.25A1.75,1.75 0,0 1,43.75 73.5Z" />
+    <!-- live dot -->
+    <path android:fillColor="#E53935" android:pathData="M69,43m-4.25,0a4.25,4.25 0,1 1,8.5 0a4.25,4.25 0,1 1,-8.5 0" />
+</vector>

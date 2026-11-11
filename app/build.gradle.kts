@@ -21,7 +21,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.ipvio.stream"
+        applicationId = "com.onair.tv"   // OnAir: installs next to the original IPVIO; Kotlin package stays com.ipvio.stream
         minSdk = 24
         targetSdk = 37
         versionCode = 1

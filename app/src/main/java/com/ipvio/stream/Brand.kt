@@ -7,8 +7,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.Composable
 
 /**
- * Das IPVIO-Zeichen (Play-Symbol mit Farbverlauf) als Bild: res/drawable/ic_brand_mark.png.
- * Der Schriftzug "IPVIO" wird daneben als weißer Text gesetzt.
+ * OnAir: the TV mark with the red live dot (vector, res/drawable/ic_brand_mark.xml).
+ * The "OnAir" wordmark is set next to it as white text where needed.
  */
 @Composable
 fun BrandMark(modifier: Modifier = Modifier) {

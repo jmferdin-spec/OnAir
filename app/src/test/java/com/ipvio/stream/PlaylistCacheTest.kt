@@ -16,7 +16,7 @@ class PlaylistCacheTest {
 http://h/live/u/p/1.ts
 #EXTINF:-1 group-title="TR | Ulusal",TRT 1
 http://h/live/u/p/2.ts
-#EXTINF:-1 group-title="Sport",beIN Sports 1
+#EXTINF:-1 group-title="Sport" xc-category-id="77",beIN Sports 1
 http://h/live/u/p/3.ts
 #EXTINF:-1 group-title="VOD | DE | Action",Matrix (1999)
 http://h/movie/u/p/4.mp4
@@ -68,6 +68,9 @@ http://h/series/u/p/8.mkv
     @Test fun cache_rundreiseOhneFilter() {
         val c = roundTrip(emptySet())!!
         assertEquals(items, c.items)
+        // OnAir: the Xtream category_id survives the cache (version 6)
+        assertEquals("77", c.items.single { it.title == "beIN Sports 1" }.catId)
+        assertEquals("Sport", c.items.single { it.title == "beIN Sports 1" }.group)
         assertEquals(listOf("http://epg"), c.epg)
         assertEquals(mapOf("DE | News" to 0), c.order)
         assertEquals(items.size, c.counts.values.sum())

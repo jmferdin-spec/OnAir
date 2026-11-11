@@ -1,112 +1,87 @@
-# IPVIO Stream
+# OnAir
 
-DOWNLOADER CODE: 7151796
+A personal IPTV player for **Google TV / Android TV**, built around one question: *what's on right now?*
 
-A free, open-source IPTV player for **Android TV, Google TV and Amazon Fire TV**, built with Kotlin and Jetpack Compose and designed for the remote control.
+OnAir is a fork of **[IPVIO Stream](https://github.com/Emrodev/IPVIO-Stream)** by Emrodev. It keeps IPVIO's player (Media3 / ExoPlayer with the FFmpeg audio decoder), Xtream Codes login and TV guide, and adds a simpler "on now" experience in five sections:
 
-![IPVIO Stream home screen](docs/screenshots/homescreen.jpg)
-
-> **IPVIO Stream does not provide any content.** It contains no channels, playlists, films or series. It is only a player for playlists that **you** add yourself (Xtream Codes login or M3U address). Only use sources that you are legally allowed to use.
-
-## Features
-
-**Playlists**
-- Xtream Codes login (server, user name, password) or an M3U address, several playlists, input from your phone over Wi-Fi
-- Handles very large playlists: language filter while loading, resumable downloads, compact storage
-- Automatic background refresh (interval or fixed time, waits during playback)
-
-**Home screen**
-- Home, Movies and Series with a large rotating header image
-- The background follows the selected title and shows its title, ratings and description
-- Rows: Continue watching, Live now, Top 10 today, Because you watched …, My list, New, Top rated, genres
-
-**Browse and details**
-- Grid or cinema view, filters by sort order, rating, year, genre and country
-- "Top rated" and sorting by rating use IMDb first, then Rotten Tomatoes, TMDB and finally the provider's rating
-- Provider categories or automatic genres, search with typo tolerance
-- Detail page with resume, trailer, my list, favourites, choice of source/quality
-- Series: seasons on the left, episodes on the right with picture, rating and description; sections and "go to episode" for very long series
-
-**Live TV**
-- Categories, favourites and your own channel lists
-- TV guide, catch-up/archive ("from the beginning"), reminders with notification
-
-**Player** (Media3 / ExoPlayer)
-- Audio and subtitle selection (remembered per title), preferred languages, subtitle style
-- FFmpeg audio decoder for AC3/E-AC3/DTS (also over Bluetooth headphones)
-- Skip intro and credits (TheIntroDB), next episode automatically
-- Quality selection with 4K check, fallback to another source on errors or stuttering
-- Buffer levels, connection watchdog, reconnect after network change and standby
-- Aspect ratio/zoom, frame-rate matching, technical info, clock overlay, sleep timer
-
-**Personal**
-- Profiles ("Who's watching?"), parental controls with PIN
-- History, my list, favourites, backup and restore of settings
-
-**Look and feel**
-- IPVIO green on navy plus 12 colour themes, 5 backgrounds, custom colours
-- Fonts Outfit, Inter or system; adjustable text and display size; animations off/subtle/normal
-- 9 languages: German, English, Turkish, Bosnian, Croatian, Serbian, Spanish, French, Italian
-
-## Screenshots
-
-| | |
+| Section | What it shows |
 |---|---|
-| ![Home screen](docs/screenshots/homescreen.jpg)<br>**Home** – rotating header, quick tiles, live TV now | ![Series details](docs/screenshots/details_series.jpg)<br>**Series details** – seasons, episodes with ratings, director |
-| ![Categories](docs/screenshots/categories_list.jpg)<br>**Automatic genres** – detected in the background | ![Director page](docs/screenshots/producer.jpg)<br>**Cast and crew pages** – with the titles from your playlist |
-| ![Player](docs/screenshots/player.jpg)<br>**Player** – skip intro, audio/subtitles, quality | ![TV guide](docs/screenshots/tvguide.jpg)<br>**TV guide** – timeline with preview |
-| ![Live TV](docs/screenshots/channel_list.jpg)<br>**Live TV** – now and next at a glance | ![Settings](docs/screenshots/settings.jpg)<br>**Settings** – grouped, remote-friendly |
+| **Live TV** | the TV guide |
+| **Movies** | films airing right now on live channels, with channel and progress |
+| **Shows** | series and shows airing right now |
+| **Sports** | games and sports programmes on now, grouped by sport |
+| **Events** | PPV and special events, live now and coming up |
 
-<sub>Screenshots taken on a TV. Film artwork, channel logos and programme data belong to their respective owners; provider categories are blurred.</sub>
+Target device: onn 4K Plus (Google TV, ~2 GB RAM, 32-bit), D-pad remote. Every screen works with D-pad + OK + Back.
+
+> **OnAir does not provide any content.** It contains no channels, playlists, films or series. It only plays what **you** add yourself (an Xtream Codes login; M3U still works as in IPVIO). Only use sources that you are legally allowed to use.
+
+## Status
+
+| Phase | |
+|---|---|
+| 0 – Understand the codebase | done |
+| 1 – Rebrand to OnAir (name, icon, TV banner, red-on-navy theme, `com.onair.tv`) | done |
+| 2 – Five-tile home screen and a standalone TV guide screen | next |
+| 3 – Guide in SQLite, "on now" classification (Movie / Show / Sports / Event) | planned |
+| 4 – The four "on now" screens | planned |
+| 5 – Tuning with a real lineup | planned |
+
+The plan and ground rules are in [CLAUDE.md](CLAUDE.md).
+
+## Kind to your provider
+
+The playlist (`player_api.php`) and the TV guide (`xmltv.php`) are stored on the device. OnAir downloads them again only on the background schedule — **at most every 12 hours** — or when you press a refresh button. It never downloads on app start or when logging in with an account it already has. After errors it waits longer each time (15 min up to 12 h) and honours the provider's `Retry-After`; while a provider is throttling, no API calls are sent at all.
+
+## Inherited from IPVIO Stream
+
+- Xtream Codes login, several playlists, input from your phone over Wi-Fi; very large playlists (language filter, resumable downloads, compact storage)
+- Home, Movies and Series browsing with filters, provider categories or automatic genres, search, detail pages, seasons and episodes
+- Live TV with categories, favourites, own channel lists, TV guide, catch-up, reminders
+- Player: audio/subtitle selection, AC3/E-AC3/DTS via FFmpeg, skip intro/credits (TheIntroDB), quality choice with fallback, reconnect after network loss, frame-rate matching, sleep timer
+- Profiles, parental PIN, history, my list, backup/restore
+- Colour themes (OnAir red on navy by default), fonts, display size; 9 UI languages (OnAir's own additions are in English)
 
 ## Your own API keys (optional)
 
-The app ships **without any API keys**. You can enter your own free keys in the app under **Settings > API keys**:
+The app ships **without any API keys**. Enter your own free keys under **Settings > API keys** (stored only on the device):
 
-| Service | Used for | Key |
-|---|---|---|
-| TMDB | posters, descriptions in your language, cast, trailers, automatic genres, episode info, similar titles | free, see below |
-| OMDb | IMDb and Rotten Tomatoes ratings | free, see below |
-| TheIntroDB | intro/recap/credits times | no key needed |
+| Service | Used for |
+|---|---|
+| TMDB | posters, descriptions, cast, trailers, automatic genres — <https://www.themoviedb.org/settings/api> (log in first, choose *Developer*, copy the 32-character *API Key*) |
+| OMDb | IMDb and Rotten Tomatoes ratings — <https://www.omdbapi.com/apikey.aspx> (free tier; click the activation link in the e-mail) |
+| TheIntroDB | intro/recap/credits times — no key needed |
 
-**Without keys** the app still works. With an Xtream Codes playlist it takes description, cover, rating, genres, running time and trailer **directly from your provider** (`player_api.php`). With a TMDB key it uses TMDB first and falls back to the provider when a title is not found. Keys are stored only on the device.
-
-### Get a free TMDB key
-1. Create an account at https://www.themoviedb.org/signup and confirm the e-mail address.
-2. **Log in.** The API page shows "restricted" as long as you are not logged in.
-3. Open https://www.themoviedb.org/settings/api (or: profile picture > Settings > API) and click **Request an API key**.
-4. Choose **Developer**, accept the terms and fill in the form (application name e.g. "IPVIO Stream", type "Personal use", a short description; the URL can be your GitHub page).
-5. Copy the **API Key** (the 32-character one, not the "API Read Access Token").
-
-### Get a free OMDb key
-1. Open https://www.omdbapi.com/apikey.aspx, choose **FREE** (1,000 requests per day), enter your e-mail address and a short reason (e.g. "personal media player").
-2. You receive an e-mail with an 8-character key and an **activation link**. Click the link, otherwise the key does not work.
-
-### Enter the keys in the app
-Settings > **API keys**: paste the key into the field, press **Save and check** (a green "Key valid" confirms it) and restart the app once. Tip: type long keys with the phone import or an USB keyboard instead of the remote.
+Without keys the app still works: with an Xtream login it takes descriptions, covers and ratings from the provider.
 
 *This product uses the TMDB API but is not endorsed or certified by TMDB.*
 
-## Building
+## Building and installing
 
-Requirements: Android Studio (current version) with the Android SDK; the Gradle wrapper downloads everything else.
+Requirements: Android Studio (current) with the Android SDK; the Gradle wrapper fetches the rest.
 
 ```
-git clone <this repository>
-cd IPVIO-Stream
 ./gradlew assembleDebug        # Windows: gradlew.bat assembleDebug
+./gradlew test                 # unit tests for the pure logic
 ```
 
-The APK is then in `app/build/outputs/apk/debug/`. For a release build, sign it with your own key (Android Studio: *Build > Generate Signed App Bundle / APK*).
+Install on the onn 4K Plus (sideloaded, not via Play Store):
 
-Developers can optionally copy `secrets.properties.example` to `secrets.properties` (ignored by Git) and put their keys there; they are only used when no key was entered in the app.
+```
+adb connect <onn-ip>:5555      # or the pairing port shown under Wireless debugging
+adb -s <onn-ip>:5555 install -r app/build/outputs/apk/debug/app-debug.apk
+```
 
-Unit tests for the pure logic: `./gradlew test`
+On the TV: Settings → System → About → press "Android TV OS build" 7 times → Developer options → enable USB debugging / Wireless debugging.
+
+OnAir uses the application ID `com.onair.tv`, so it installs next to an original IPVIO Stream. The Kotlin package is still `com.ipvio.stream` to keep merging from upstream easy (`git fetch upstream`).
+
+Credentials are entered in the app only and stored encrypted on the device — never in the repository, `secrets.properties` or tests. Developers may copy `secrets.properties.example` to `secrets.properties` (git-ignored) for TMDB/OMDb keys.
 
 ## Project layout
 
 ```
-app/src/main/java/com/ipvio/stream/   all Kotlin sources (one package)
+app/src/main/java/com/ipvio/stream/   all Kotlin sources (one package, inherited from IPVIO)
   *Logic.kt                           pure, Android-free logic (covered by unit tests)
   Dict*.kt                            translations (one row per text: de¦en¦tr¦bs¦hr¦sr¦es¦fr¦it)
 app/src/test/java/com/ipvio/stream/   JUnit tests
@@ -114,13 +89,13 @@ app/src/main/res/font/                Outfit and Inter (SIL Open Font License)
 licenses/                             font licences
 ```
 
-## License
+## Credits and licence
 
-Copyright (C) 2026 IPVIO Stream contributors
+OnAir is based on **[IPVIO Stream](https://github.com/Emrodev/IPVIO-Stream)** by Emrodev — thank you! The name "IPVIO" and the IPVIO logo belong to the original project; OnAir uses its own name and logo, as IPVIO asks of modified versions.
 
-IPVIO Stream is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License version 3** (see [LICENSE](LICENSE)). The GPL is required because the app includes the GPL-3.0 licensed FFmpeg audio decoder. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the libraries, fonts and services used.
+Copyright (C) 2026 IPVIO Stream contributors; OnAir changes (C) 2026 the OnAir contributors.
 
-The name "IPVIO" and the IPVIO logo identify the original project. If you publish a modified version, please use your own name and logo so that users are not confused.
+OnAir is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License version 3** (see [LICENSE](LICENSE)). The GPL is required because the app includes the GPL-3.0 licensed FFmpeg audio decoder. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the libraries, fonts and services used.
 
 ## Disclaimer
 

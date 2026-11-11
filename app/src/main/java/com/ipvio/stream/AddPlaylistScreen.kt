@@ -92,7 +92,7 @@ fun AddPlaylistScreen(onDone: () -> Unit) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 BrandMark(Modifier.size(48.dp))
-                Text("IPVIO", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.ExtraBold)
+                Text("OnAir", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.ExtraBold)
             }
             Text("Playlist hinzufügen", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

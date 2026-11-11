@@ -19,16 +19,24 @@ class BgPreset(val name: String, val bg: Int, val surf: Int, val surf2: Int)
  * dadurch ändert sich beim Umschalten die ganze App sofort, ohne dass irgendein Bildschirm angepasst werden muss.
  */
 object Look {
-    /** Standard-Design: helles Grün #4ADE80 (Hervorhebung #86EFAC) auf Navy #0B0F19. */
+    /** Upstream green (#4ADE80 / #86EFAC) – still offered as the preset „Grün“, no longer the default. */
     const val BRAND_GREEN = 0x4ADE80
     const val BRAND_GREEN_HI = 0x86EFAC
+    /**
+     * OnAir default: live red on navy. Fill #D32F2F carries white text (contrast ≈ 5:1); highlight #FF6B6B is the
+     * readable red for text and focus frames on navy (≈ 7:1 on #0B0F19).
+     */
+    const val BRAND_RED = 0xD32F2F
+    const val BRAND_RED_HI = 0xFF6B6B
     const val BRAND_NAVY = 0x0B0F19
-    /** Standard: IPVIO-Grün auf Navy (Runde 13e: die Entwurfs-Farben wurden wieder entfernt). */
+    /** Standard: OnAir red on navy (index 0 of [ACCENTS] / [BGS]). */
     const val DEFAULT_ACCENT = 0
     const val DEFAULT_BG = 0
+    /** Starting value of the custom colour picker. */
+    const val DEFAULT_CUSTOM = BRAND_RED
 
     val ACCENTS = listOf(
-        AccentPreset("IPVIO", BRAND_GREEN, BRAND_GREEN_HI),
+        AccentPreset("OnAir", BRAND_RED, BRAND_RED_HI),
         AccentPreset("Violett & Türkis", 0x7C5CFF, 0x00D4C8),
         AccentPreset("Ozean", 0x2F6FE0, 0x5CD6FF),
         AccentPreset("Smaragd", 0x0A7F58, 0x4ADE80),
@@ -39,7 +47,9 @@ object Look {
         AccentPreset("Eisblau", 0x0E7490, 0x67E8F9),
         AccentPreset("Limette", 0x4D7C0F, 0xBEF264),
         AccentPreset("Purpur", 0x7E22CE, 0xE879F9),
-        AccentPreset("Schiefer", 0x475569, 0xE2E8F0)
+        AccentPreset("Schiefer", 0x475569, 0xE2E8F0),
+        // OnAir: upstream's green, appended so the indices above stay as they were
+        AccentPreset("Grün", BRAND_GREEN, BRAND_GREEN_HI)
     )
     /** Farbfelder für die eigene Farbe (2 Reihen à 10). */
     val SWATCHES = listOf(
@@ -50,7 +60,7 @@ object Look {
     val CUSTOM get() = ACCENTS.size
 
     val BGS = listOf(
-        BgPreset("IPVIO Navy", BRAND_NAVY, 0x151B2A, 0x1F2739),
+        BgPreset("OnAir Navy", BRAND_NAVY, 0x151B2A, 0x1F2739),
         BgPreset("Mitternacht", 0x07080C, 0x12141C, 0x1B1E2A),
         BgPreset("OLED-Schwarz", 0x000000, 0x0B0C10, 0x15171E),
         BgPreset("Graphit", 0x121316, 0x1C1E24, 0x272A32),
@@ -65,7 +75,7 @@ object Look {
 
     var accentIdx by mutableIntStateOf(DEFAULT_ACCENT)
     /** Eigene Farbe 1 (Flächen, Knöpfe, Balken). */
-    var custom by mutableIntStateOf(BRAND_GREEN)
+    var custom by mutableIntStateOf(DEFAULT_CUSTOM)
     /** Eigene Farbe 2 (Hervorhebung, Schrift und Rahmen auf dem Hintergrund); -1 = automatisch aus Farbe 1. */
     var custom2 by mutableIntStateOf(-1)
     var bgIdx by mutableIntStateOf(DEFAULT_BG)

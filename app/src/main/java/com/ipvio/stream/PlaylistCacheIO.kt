@@ -11,10 +11,11 @@ import java.io.OutputStream
  * Version 5: enthält nur die gezeigten Sprachen (große Anbieter: 800.000 Einträge → z. B. 120.000) und im Kopf
  * die Anzahl und Datenmenge je Sprache der ganzen Liste sowie die damals ausgeblendeten Sprachen.
  * Die ganze Liste liegt zusätzlich komprimiert auf dem Gerät (pl_*.m3u.gz), daraus wird bei einer anderen Sprachauswahl neu eingelesen.
+ * OnAir version 6: like 5, plus the Xtream category_id of each entry ([Item.catId]) after the tvg-id.
  * Version 4 (ganze Liste, Sprache vorne in jedem Eintrag) und 3 (ohne Sprache) werden weiter gelesen.
  */
 object PlaylistCacheIO {
-    const val VERSION = 5
+    const val VERSION = 6
     private const val MAX_STR = 1 shl 20      // 1 MB pro Text: mehr kann nur eine beschädigte Datei sein
     private const val MAX_COUNT = 2_000_000
 
@@ -57,7 +58,7 @@ object PlaylistCacheIO {
 
     private fun DataInputStream.head(url: String): Head? {
         val version = readInt()
-        if (version !in 3..5) return null
+        if (version !in 3..6) return null
         if (str() != url.trim()) return null
         val ne = count()
         val epg = ArrayList<String>(ne)
@@ -137,7 +138,7 @@ object PlaylistCacheIO {
 
     private fun DataOutputStream.item(i: Item) {
         str(i.id); writeInt(i.kind.ordinal); str(i.lang); str(i.title); writeInt(i.year ?: -1); str(i.url); str(i.logo); str(i.group)
-        str(i.quality); str(i.tvgId)
+        str(i.quality); str(i.tvgId); str(i.catId)
         writeInt(i.episodes.size)
         for (e in i.episodes) {
             writeInt(e.season); writeInt(e.num); str(e.title); str(e.url); str(e.quality)
@@ -153,7 +154,7 @@ object PlaylistCacheIO {
         var lang: String? = if (version >= 4) pool.of(str() ?: LangTagLogic.UNKNOWN) else null
         if (lang != null) {
             counts[lang] = (counts[lang] ?: 0) + 1
-            if (lang in hidden) { skipItemRest(); return null }
+            if (lang in hidden) { skipItemRest(version); return null }
         }
         // Ältere Zwischenspeicher: Titel noch mit „&amp;“ bzw. „|EN|“ – beim Lesen bereinigen (schnell, meist unverändert)
         val rawTitle = str() ?: ""
@@ -164,6 +165,7 @@ object PlaylistCacheIO {
         val group = pool.of(str() ?: "")
         val quality = pool.ofOrNull(str())
         val tvg = str()
+        val catId = if (version >= 6) pool.ofOrNull(str()) else null
         val n = count()
         val eps = ArrayList<Episode>(n)
         for (k in 0 until n) {
@@ -186,12 +188,13 @@ object PlaylistCacheIO {
         }
         return Item(
             id = id, kind = kind, title = title, year = if (y < 0) null else y, url = url, logo = logo,
-            group = group, episodes = EpisodeTable.of(eps, pool), quality = quality, tvgId = tvg, lang = lang
+            group = group, episodes = EpisodeTable.of(eps, pool), quality = quality, tvgId = tvg, lang = lang, catId = catId
         )
     }
 
-    private fun DataInputStream.skipItemRest() {
+    private fun DataInputStream.skipItemRest(version: Int) {
         skipStr(); readInt(); skipStr(); skipStr(); skipStr(); skipStr(); skipStr()   // Titel, Jahr, Adresse, Logo, Kategorie, Qualität, tvg-id
+        if (version >= 6) skipStr()   // OnAir: category_id
         val n = count()
         for (k in 0 until n) {
             readInt(); readInt(); skipStr(); skipStr(); skipStr()

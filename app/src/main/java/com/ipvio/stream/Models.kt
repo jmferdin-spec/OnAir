@@ -128,7 +128,9 @@ data class Item(
     val quality: String? = null,
     val tvgId: String? = null,
     /** Sprache laut Kennzeichnung des Anbieters (Kürzel aus [LangTagLogic], "?" = ohne Kennung). */
-    val lang: String = LangTagLogic.UNKNOWN
+    val lang: String = LangTagLogic.UNKNOWN,
+    /** OnAir: Xtream category_id of a live channel (player_api login), null otherwise. [group] holds the category name. */
+    val catId: String? = null
 ) {
     // Schlüssel für den Metadaten-Cache: einmal pro Titel berechnet statt bei jedem Sortiervergleich neu.
     // Eigenes Feld statt "by lazy": spart bei 100.000+ Titeln zwei Hilfsobjekte je Titel.
@@ -201,7 +203,7 @@ object M3uParser {
     private fun rank(q: String?) = when (q) { "4K" -> 4; "FHD" -> 3; "HD" -> 2; else -> 1 }
 
     // Einmal gebaut statt für jede Zeile neu (große Playlists haben 100.000+ Zeilen)
-    private val ATTRS = listOf("tvg-logo", "tvg-id", "group-title", "url-tvg", "x-tvg-url")
+    private val ATTRS = listOf("tvg-logo", "tvg-id", "group-title", "url-tvg", "x-tvg-url", XtreamApiLogic.CAT_ATTR)
         .associateWith { Regex(it + "=\"([^\"]*)\"") }
 
     private fun attr(line: String, key: String): String? =
@@ -411,7 +413,8 @@ object M3uParser {
                     val id = e.url.hashCode().toString()
                     out.add(Item(id, Kind.LIVE, TitleText.decode(e.name), null, e.url,
                         attr(e.info, "tvg-logo")?.ifBlank { null }, group, quality = q,
-                        tvgId = attr(e.info, "tvg-id")?.ifBlank { null }, lang = kd.lang))
+                        tvgId = attr(e.info, "tvg-id")?.ifBlank { null }, lang = kd.lang,
+                        catId = pool.ofOrNull(attr(e.info, XtreamApiLogic.CAT_ATTR)?.ifBlank { null })))
                     CatchupLogic.fromInfo(e.info, e.url, headCu)?.let { catchup[id] = it }
                 }
             }

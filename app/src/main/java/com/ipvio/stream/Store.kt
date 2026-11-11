@@ -85,6 +85,9 @@ object AppSettings {
     val menuOrder = mutableStateListOf(*MenuLogic.DEFAULT_ORDER.toTypedArray())
     val menuHidden = mutableStateListOf(*MenuLogic.parseHidden(MenuLogic.DEFAULT_HIDDEN).toTypedArray())
     val searchHistory = mutableStateListOf<String>()
+    // OnAir: see LookMigrationLogic
+    private const val LOOK_VER_ONAIR = LookMigrationLogic.VERSION
+    private const val OLD_CUSTOM = LookMigrationLogic.OLD_CUSTOM
     private fun prefs(c: Context) = Profiles.sp(c, "ipvio_settings")
 
     fun init(c: Context) {
@@ -131,15 +134,21 @@ object AppSettings {
         }
         searchHistory.clear()
         searchHistory.addAll((p.getString("search_hist", "") ?: "").split("\n").filter { it.isNotBlank() })
+        // OnAir: a fresh install has nothing to migrate – skip upstream's colour migrations entirely, so none of them can
+        // put a green (or any other old default) over the OnAir default (red on navy).
+        if (LookMigrationLogic.isFresh(p.contains("look_ver"), p.contains("look_accent"), p.contains("look_custom"))) {
+            p.edit().putInt("look_ver", LOOK_VER_ONAIR).commit()
+        }
         if (p.getInt("look_ver", 1) < 2) {
-            // Einmalig: Firmenfarben (IPVIO-Grün auf Navy) als neues Standard-Design setzen. Eigene Farbe bleibt erhalten.
-            p.edit().putInt("look_accent", 0).putInt("look_bg", 0).putInt("look_ver", 2).commit()
+            // Einmalig: Firmenfarben als neues Standard-Design setzen. Eigene Farbe bleibt erhalten.
+            p.edit().putInt("look_accent", Look.DEFAULT_ACCENT).putInt("look_bg", Look.DEFAULT_BG).putInt("look_ver", 2).commit()
         }
         if (p.getInt("look_ver", 1) < 4) {
             // Einmalig: frühere Standard-Grüns (#39FF13, #22C55E) als eigene Farbe durch das aktuelle ersetzen.
+            // OnAir: replaced by the OnAir default custom colour instead of upstream green.
             val e = p.edit().putInt("look_ver", 4)
             val old = setOf(0x39FF13, 0x22C55E)
-            if ((p.getInt("look_custom", Look.BRAND_GREEN) and 0xFFFFFF) in old) e.putInt("look_custom", Look.BRAND_GREEN)
+            if ((p.getInt("look_custom", Look.DEFAULT_CUSTOM) and 0xFFFFFF) in old) e.putInt("look_custom", Look.DEFAULT_CUSTOM)
             val c2 = p.getInt("look_custom2", -1)
             if (c2 >= 0 && (c2 and 0xFFFFFF) == 0x39FF13) e.putInt("look_custom2", Look.BRAND_GREEN_HI)
             e.commit()
@@ -152,20 +161,31 @@ object AppSettings {
             e.putInt("look_accent", 12).putInt("look_bg", 5).commit()
         }
         if (p.getInt("look_ver", 1) < 6) {
-            // Einmalig (Runde 13e): zurück zu den Standard-Farben (IPVIO-Grün auf Navy). Die Entwurfs-Vorgaben gibt es nicht mehr,
+            // Einmalig (Runde 13e): zurück zu den Standard-Farben. Die Entwurfs-Vorgaben gibt es nicht mehr,
             // die eigene Farbe steht wieder an Stelle 12. Wer vorher die eigene Farbe hatte, bekommt sie zurück.
+            // OnAir: writes the old custom index (12); the OnAir step below moves it to the current one.
             val e = p.edit().putInt("look_ver", 6)
             val acc = p.getInt("look_accent", 0)
             val newAcc = when {
-                acc == 13 -> Look.CUSTOM
-                acc == 12 -> if (p.getInt("look_custom_was", 0) == 1) Look.CUSTOM else Look.DEFAULT_ACCENT
+                acc == 13 -> OLD_CUSTOM
+                acc == 12 -> if (p.getInt("look_custom_was", 0) == 1) OLD_CUSTOM else Look.DEFAULT_ACCENT
                 else -> acc
             }
             val bg = p.getInt("look_bg", 0)
             e.putInt("look_accent", newAcc).putInt("look_bg", if (bg >= 5) Look.DEFAULT_BG else bg).remove("look_custom_was").commit()
         }
+        if (p.getInt("look_ver", 1) < LOOK_VER_ONAIR) {
+            // OnAir (settings from IPVIO, e.g. a restored backup): preset 0 is now OnAir red, so "IPVIO green" users get the
+            // new default automatically. The green preset was appended, which moves the custom colour from index 12 to
+            // Look.CUSTOM; a custom colour still at upstream's green default becomes the OnAir default custom colour.
+            val (acc, cust) = LookMigrationLogic.toOnAir(
+                p.getInt("look_accent", Look.DEFAULT_ACCENT), p.getInt("look_custom", Look.BRAND_GREEN),
+                Look.CUSTOM, Look.BRAND_GREEN, Look.DEFAULT_CUSTOM
+            )
+            p.edit().putInt("look_ver", LOOK_VER_ONAIR).putInt("look_accent", acc).putInt("look_custom", cust).commit()
+        }
         Look.accentIdx = p.getInt("look_accent", Look.DEFAULT_ACCENT).coerceIn(0, Look.ACCENTS.size)
-        Look.custom = p.getInt("look_custom", Look.BRAND_GREEN) and 0xFFFFFF
+        Look.custom = p.getInt("look_custom", Look.DEFAULT_CUSTOM) and 0xFFFFFF
         Look.custom2 = p.getInt("look_custom2", -1).let { if (it < 0) -1 else it and 0xFFFFFF }
         Look.bgIdx = p.getInt("look_bg", Look.DEFAULT_BG).coerceIn(0, Look.BGS.lastIndex)
         Look.motion = p.getInt("look_motion", 2).coerceIn(0, 2)
@@ -180,7 +200,7 @@ object AppSettings {
         Look.bgIdx = bg.coerceIn(0, Look.BGS.lastIndex)
         Look.motion = motion.coerceIn(0, 2)
         Look.uiScale = scale.coerceIn(0, Look.SCALES.lastIndex)
-        prefs(c).edit().putInt("look_accent", Look.accentIdx).putInt("look_custom", Look.custom).putInt("look_custom2", Look.custom2).putInt("look_bg", Look.bgIdx).putInt("look_ver", 6)
+        prefs(c).edit().putInt("look_accent", Look.accentIdx).putInt("look_custom", Look.custom).putInt("look_custom2", Look.custom2).putInt("look_bg", Look.bgIdx).putInt("look_ver", LOOK_VER_ONAIR)
             .putInt("look_motion", Look.motion).putInt("look_scale", Look.uiScale).apply()
     }
 
