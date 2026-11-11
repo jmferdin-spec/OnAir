@@ -259,6 +259,8 @@ Two features: a **force guide update** button and **Multiview** (two live channe
 - Back: "Exit multiview?" – Yes: the selected screen continues full-screen; No: stay.
 - Error / provider limit (e.g. HTTP 4xx because of connections) on one screen: shown on that screen only; the other keeps playing.
 
+- **Lesson (Phase 8, black Multiview screens):** a `PlayerView` attached to a player that is *already playing* keeps its black "shutter" closed until the player reports a first rendered frame, which does not come again after a surface change – audio plays, the picture stays black. Every Multiview video view is made by `videoView()` in `Multiview.kt` (transparent shutter, keep content on attach). Use it for any view that takes over a running player.
+
 ### Phase 9 — Channel picker ("Add channel" / "Change channel")
 
 - The normal home screen and its Live TV / Movies / Shows / Sports / Events screens and search, in a picker mode: choosing a card or channel returns it to Multiview instead of starting the player. The running stream keeps playing while picking (see questions).

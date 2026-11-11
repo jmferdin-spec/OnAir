@@ -212,6 +212,26 @@ object Multiview {
     }
 }
 
+/**
+ * A video view for a Multiview player – used for the picker's small window and for every screen.
+ *
+ * Cause of the black screens (Phase 8): PlayerView covers its own SurfaceView with an opaque black "shutter" whenever a
+ * player is attached, and opens it only on the player's "first frame rendered" event. Multiview attaches a NEW PlayerView
+ * to a player that is ALREADY playing (screen 1 was rendering into the picker's window, screen 2 was started while the
+ * picker was open, without a surface). The decoder switched to the new surface fine (logcat: setOutputSurface …
+ * Surface configure completed) and audio played, but that event did not come again, so the shutter stayed closed over
+ * the video. The two-stream test and the picker window worked because there the view is attached right when the player
+ * starts. Fix: transparent shutter and keep content on attach – nothing can cover the surface any more.
+ */
+@OptIn(UnstableApi::class)
+private fun videoView(c: Context, player: ExoPlayer): PlayerView = PlayerView(c).apply {
+    useController = false
+    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+    setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+    setKeepContentOnPlayerReset(true)
+    this.player = player
+}
+
 /** The running stream in a small window at the top right (same place as the TV guide's picture). */
 @OptIn(UnstableApi::class)
 @Composable
@@ -220,8 +240,7 @@ private fun MiniWindow(slot: Multiview.Slot?) {
         Column(Modifier.align(Alignment.TopEnd).padding(top = 20.dp, end = 24.dp).width(400.dp)) {
             Box(Modifier.size(400.dp, 225.dp).clip(RoundedCornerShape(DS.RadiusM)).background(Color.Black)) {
                 if (slot != null) key(slot.player) {
-                    AndroidView(factory = { c -> PlayerView(c).apply { useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT; player = slot.player } },
-                        modifier = Modifier.fillMaxSize())
+                    AndroidView(factory = { c -> videoView(c, slot.player) }, modifier = Modifier.fillMaxSize())
                 }
             }
             if (slot != null) Text(slot.item.title, color = Muted, fontSize = 14.sp, raw = true, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
@@ -386,10 +405,7 @@ private fun MultiviewScreen(onFinish: (String?) -> Unit) {
                         .border(if (selected) 4.dp else 1.dp, if (selected) Accent1 else Color(0x33FFFFFF), RoundedCornerShape(6.dp))
                         .padding(if (selected) 4.dp else 1.dp)
                 ) {
-                    AndroidView(
-                        factory = { c -> PlayerView(c).apply { useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT; player = slot.player } },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    AndroidView(factory = { c -> videoView(c, slot.player) }, modifier = Modifier.fillMaxSize())
                     // channel label; audio marker on the selected screen
                     Row(Modifier.align(Alignment.BottomStart).padding(8.dp).clip(RoundedCornerShape(6.dp)).background(Color(0x99000000)).padding(horizontal = 10.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
