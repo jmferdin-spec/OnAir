@@ -207,4 +207,35 @@ class RefreshLogicTest {
         assertNull(RefreshLogic.nextAllowedAt(State(), now, Trigger.EVENTS, hasCache = false))
         assertEquals(30 * MIN, RefreshLogic.EVENTS_INTERVAL_MS)
     }
+
+    // ------------------------------------------------------------------ OnAir v2: manual guide update (home button)
+
+    @Test fun guide_button_at_most_every_15_minutes() {
+        assertTrue(RefreshLogic.allowed(State(), now, Trigger.GUIDE, hasCache = true))           // never pressed
+        assertTrue(RefreshLogic.allowed(State(), now, Trigger.GUIDE, hasCache = false))          // nothing stored yet: also fine
+        val pressed = State(lastSuccess = now - 5 * MIN, lastAttempt = now - 5 * MIN)
+        assertFalse(RefreshLogic.allowed(pressed, now, Trigger.GUIDE, hasCache = true))
+        assertEquals(now + 10 * MIN, RefreshLogic.nextAllowedAt(pressed, now, Trigger.GUIDE, hasCache = true))
+        assertEquals(RefreshLogic.Wait.INTERVAL, RefreshLogic.waitReason(pressed, now, Trigger.GUIDE, hasCache = true))
+        assertTrue(RefreshLogic.allowed(pressed, now + 10 * MIN, Trigger.GUIDE, hasCache = true))
+        // a scheduled refresh 2 h ago does not block the button (its own 15 min count from the last attempt)
+        assertTrue(RefreshLogic.allowed(fresh, now, Trigger.GUIDE, hasCache = true))
+        assertEquals(15 * MIN, RefreshLogic.GUIDE_MANUAL_INTERVAL_MS)
+    }
+
+    @Test fun guide_button_backoff_and_provider_cooldown_say_why() {
+        // 2 failures in a row: backoff 30 min beats the 15 min interval
+        val failing = State(lastSuccess = now - 3 * HOUR, lastAttempt = now - 20 * MIN, failures = 2)
+        assertEquals(now + 10 * MIN, RefreshLogic.nextAllowedAt(failing, now, Trigger.GUIDE, hasCache = true))
+        assertEquals(RefreshLogic.Wait.BACKOFF, RefreshLogic.waitReason(failing, now, Trigger.GUIDE, hasCache = true))
+        val throttled = State(lastAttempt = now - 30 * MIN, cooldownUntil = now + 40 * MIN)
+        assertEquals(RefreshLogic.Wait.PROVIDER, RefreshLogic.waitReason(throttled, now, Trigger.GUIDE, hasCache = true))
+        assertEquals(RefreshLogic.Wait.NONE, RefreshLogic.waitReason(State(), now, Trigger.GUIDE, hasCache = true))
+    }
+
+    @Test fun guide_button_success_also_resets_the_12_hour_schedule() {
+        val updated = RefreshLogic.succeeded(fresh, now)
+        assertFalse(RefreshLogic.allowed(updated, now + 11 * HOUR, Trigger.SCHEDULED, hasCache = true))
+        assertTrue(RefreshLogic.allowed(updated, now + 12 * HOUR, Trigger.SCHEDULED, hasCache = true))
+    }
 }

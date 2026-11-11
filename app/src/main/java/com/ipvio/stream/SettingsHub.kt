@@ -955,7 +955,12 @@ private fun LivePage(ctx: Context) {
             // AUTO: only the new address is downloaded; the provider's guide comes from the device
             Xmltv.start(ctx, PlaylistStore.epgUrls, PlaylistStore.channels, RefreshLogic.Trigger.AUTO)
         }
-        PillButton("Neu laden") { Xmltv.start(ctx, PlaylistStore.epgUrls, PlaylistStore.channels, RefreshLogic.Trigger.MANUAL) }
+        // OnAir v2: same rule as the home button (guide only, 15 min); pressed too soon → say why and from when
+        PillButton("Neu laden") {
+            Xmltv.updateNow(ctx, PlaylistStore.epgUrls, PlaylistStore.channels)?.let { b ->
+                android.widget.Toast.makeText(ctx, Lang.tr(GuideUpdateLogic.blockedText(b) { guideStamp(it) }), android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
     }
     Spacer(Modifier.height(4.dp))
     Text("Favoriten: ${Library.favs.size} Sender · ${CatFavs.list.size} Kategorien", color = Color.White, fontSize = 17.sp)

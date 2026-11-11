@@ -122,4 +122,15 @@ Gerade keine Events¦No events right now
 Gerade keine Events – {#0} leere PPV-Plätze ausgeblendet¦No events right now – {#0} empty PPV slots hidden
 Kein Programm im Guide¦No guide data
 Quelle wählen¦Choose source
+# OnAir v2: Phase 6 – "Update guide" on the home screen
+Programm aktualisieren¦Update guide
+Programm wird aktualisiert …¦Updating guide …
+Programm wird heruntergeladen …¦Downloading guide …
+Aktualisierung fehlgeschlagen: {0}¦Update failed: {0}
+Programm aktualisiert {0}¦Guide updated {0}
+Noch kein Programm geladen¦No guide loaded yet
+Der Anbieter bittet zu warten – neuer Versuch ab {0}¦The provider asked us to wait – next try from {0}
+Der letzte Versuch ist fehlgeschlagen – neuer Versuch ab {0}¦The last attempt failed – next try from {0}
+Programm wurde {0} aktualisiert – nächste Aktualisierung ab {1}¦Guide was updated at {0} – next update possible from {1}
+Nächste Aktualisierung ab {0}¦Next update possible from {0}
 """

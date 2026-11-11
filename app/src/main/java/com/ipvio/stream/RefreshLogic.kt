@@ -55,11 +55,37 @@ object RefreshLogic {
          * OnAir: lightweight Events refresh (get_live_streams for the PPV categories only) when the home or Events screen
          * opens: at most every [EVENTS_INTERVAL_MS] after the last attempt, with the normal backoff after failures.
          */
-        EVENTS
+        EVENTS,
+        /**
+         * OnAir v2: the owner's "Update guide" button – downloads only the guide (xmltv.php): at most every
+         * [GUIDE_MANUAL_INTERVAL_MS] after the last attempt, plus the normal backoff and provider cooldown.
+         */
+        GUIDE
     }
 
     /** The Events refresh runs at most this often. */
     const val EVENTS_INTERVAL_MS = 30 * MIN
+
+    /** The manual guide update ([Trigger.GUIDE]) runs at most this often. */
+    const val GUIDE_MANUAL_INTERVAL_MS = 15 * MIN
+
+    /** Why a fetch has to wait (for the message shown to the owner). */
+    enum class Wait { NONE, INTERVAL, BACKOFF, PROVIDER }
+
+    /**
+     * The reason [nextAllowedAt] lies in the future, the one that ends last: the provider's cooldown, the failure backoff,
+     * or the trigger's own interval. [NONE] when allowed now (or never by itself).
+     */
+    fun waitReason(state: State, now: Long, trigger: Trigger, hasCache: Boolean): Wait {
+        val s = sane(state, now)
+        val next = nextAllowedAt(s, now, trigger, hasCache) ?: return Wait.NONE
+        if (next <= now) return Wait.NONE
+        return when (next) {
+            s.cooldownUntil -> Wait.PROVIDER
+            backoffEnd(s) -> Wait.BACKOFF
+            else -> Wait.INTERVAL
+        }
+    }
 
     fun backoffMs(failures: Int): Long = if (failures <= 0) 0L else BACKOFF_MS[(failures - 1).coerceAtMost(BACKOFF_MS.lastIndex)]
 
@@ -91,6 +117,7 @@ object RefreshLogic {
             Trigger.AUTO -> if (hasCache) return null else backoffEnd(s)
             Trigger.SCHEDULED -> maxOf(backoffEnd(s), if (hasCache && s.lastSuccess > 0L) s.lastSuccess + MIN_INTERVAL_MS else 0L)
             Trigger.EVENTS -> if (!hasCache) return null else maxOf(backoffEnd(s), if (s.lastAttempt > 0L) s.lastAttempt + EVENTS_INTERVAL_MS else 0L)
+            Trigger.GUIDE -> maxOf(backoffEnd(s), if (s.lastAttempt > 0L) s.lastAttempt + GUIDE_MANUAL_INTERVAL_MS else 0L)
         }
         return maxOf(t, s.cooldownUntil, now)
     }

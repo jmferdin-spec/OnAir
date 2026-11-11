@@ -93,6 +93,14 @@ object Xmltv {
         private set
     var rowCount by mutableIntStateOf(0)
         private set
+    /** OnAir v2: what a running update is doing right now (null = nothing), for the home screen's "Update guide" line. */
+    var phase by mutableStateOf<GuideUpdateLogic.Phase?>(null)
+        private set
+    /** OnAir v2: error of the last update the owner started (button), and when; null after a successful one. */
+    var lastError by mutableStateOf<String?>(null)
+        private set
+    var errorAt by mutableLongStateOf(0L)
+        private set
     /** OnAir Phase 3: tvg-ids (lower case) that have programmes in [GuideDb] – small, kept in memory for [has]. */
     @Volatile private var ids: Set<String> = emptySet()
     /** Recently read channels (the guide scrolls back and forth); cleared whenever the database changes. */
@@ -144,6 +152,7 @@ object Xmltv {
         val f = file(c, url)
         val key = RefreshGate.epgKey(url)
         if (!RefreshGate.allowed(c, key, trigger, f.exists() && f.length() > 0)) return null
+        phase = GuideUpdateLogic.Phase.DOWNLOADING
         val t = tmpOf(f)
         return try {
             download(c, url, t, active)
@@ -288,6 +297,8 @@ object Xmltv {
         }
         job?.cancel()
         job = scope.launch {
+          val me = coroutineContext[Job]
+          try {
             // What the database already has is usable at once (no waiting for the import)
             if (ids.isEmpty()) refreshView(app)
             status = "Wird geladen …"
@@ -304,6 +315,7 @@ object Xmltv {
             val current = runCatching { GuideDb.meta(app, "sig") }.getOrNull()
             if (files.isNotEmpty() && sig != current) {
                 status = "Programm wird eingelesen …"
+                phase = GuideUpdateLogic.Phase.IMPORTING
                 val t0 = System.currentTimeMillis()
                 try {
                     val offsets = GuideLogic.OffsetTally()
@@ -325,7 +337,46 @@ object Xmltv {
             LoginDebug.info("guide: ${ids.size} channels, $rowCount programmes" + (if (err != null) " (error: $err)" else ""))
             status = if (ids.isEmpty()) "Keine Programmdaten erhalten (${err ?: "leer"})"
             else "Geladen: ${ids.size} Sender mit Programm"
+            // OnAir v2: the result of an update the owner started is shown next to the button
+            if (trigger == RefreshLogic.Trigger.GUIDE || trigger == RefreshLogic.Trigger.MANUAL) {
+                lastError = err; errorAt = System.currentTimeMillis()
+            }
+          } finally {
+            if (job === me) phase = null
+          }
         }
+    }
+
+    /**
+     * OnAir v2: may the owner's "Update guide" button run now? null = yes; else why not and from when (the guide address
+     * that is free soonest). Includes the provider's cooldown. Reads only stored state – no request.
+     */
+    fun manualCheck(c: Context, urls: List<String>): GuideUpdateLogic.Blocked? {
+        val app = c.applicationContext
+        val all = allUrls(app, urls)
+        if (all.isEmpty()) return null
+        val now = System.currentTimeMillis()
+        val per = all.map { u ->
+            val key = RefreshGate.epgKey(u)
+            val cached = file(app, u).let { it.exists() && it.length() > 0 }
+            val next = RefreshGate.nextAllowedAt(app, key, RefreshLogic.Trigger.GUIDE, cached)
+            val reason = if (ProviderGuard.coolingDown(now)) RefreshLogic.Wait.PROVIDER
+            else RefreshLogic.waitReason(RefreshGate.state(app, key), now, RefreshLogic.Trigger.GUIDE, cached)
+            next to reason
+        }
+        val (reason, until) = GuideUpdateLogic.combine(now, per) ?: return null
+        return GuideUpdateLogic.Blocked(reason, until, storedAt)
+    }
+
+    /**
+     * OnAir v2: the home screen's "Update guide" button – downloads only the guide (xmltv.php, every guide address of the
+     * playlist that may be fetched now) and re-imports it. Never the catalog. Returns why it can't run, or null if started.
+     */
+    fun updateNow(c: Context, urls: List<String>, items: List<Item>): GuideUpdateLogic.Blocked? {
+        if (phase != null) return null   // already running
+        manualCheck(c, urls)?.let { return it }
+        start(c, urls, items, RefreshLogic.Trigger.GUIDE)
+        return null
     }
 
     private fun parseTime(s: String?): Long? = xmltvTime(s)

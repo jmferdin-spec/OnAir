@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -96,6 +97,38 @@ object OnAirNav {
 
     /** Home button / app resumed: straight to the five tiles. */
     fun home() { guideList = null; guideKey = null; openedFrom = OnAirScreen.HOME; screen = OnAirScreen.HOME }
+}
+
+/** "14:05" today, otherwise "Mo 10.11. 14:05" – for the guide update line (Unix ms). */
+internal fun guideStamp(ms: Long): String {
+    val sec = ms / 1000
+    val today = dayLabel(System.currentTimeMillis() / 1000) == dayLabel(sec)
+    return if (today) hhmm(sec) else dayLabel(sec) + " " + hhmm(sec)
+}
+
+/**
+ * OnAir v2 (Phase 6): "Update guide" – downloads only the guide (xmltv.php) and re-imports it, never the catalog.
+ * Next to it: "Guide updated 14:05", the running step, the last error, or – right after a press that came too soon – why
+ * and from when it is possible again (15 min after the last attempt, backoff, provider cooldown; see [GuideUpdateLogic]).
+ */
+@Composable
+private fun RowScope.GuideUpdateButton(live: List<Item>) {
+    val ctx = LocalContext.current
+    var blocked by remember { mutableStateOf<GuideUpdateLogic.Blocked?>(null) }
+    var pressTick by remember { mutableIntStateOf(0) }
+    // the "too soon" explanation stays for a few seconds, then the normal line returns
+    LaunchedEffect(pressTick) { if (blocked != null) { delay(8_000); blocked = null } }
+    val phase = Xmltv.phase
+    PillButton(if (phase != null) "Programm wird aktualisiert …" else "Programm aktualisieren", icon = AIcon.Refresh) {
+        if (Xmltv.phase != null) return@PillButton
+        blocked = Xmltv.updateNow(ctx, PlaylistStore.epgUrls, live)
+        pressTick++
+    }
+    val line = GuideUpdateLogic.line(phase, blocked, Xmltv.lastError, Xmltv.errorAt, Xmltv.storedAt) { guideStamp(it) }
+    Text(
+        line, color = if (blocked != null || (phase == null && Xmltv.lastError != null && Xmltv.errorAt >= Xmltv.storedAt)) Accent2 else Muted,
+        fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)
+    )
 }
 
 internal fun tileIcon(t: OnAirTile): Int = when (t) {
@@ -203,8 +236,7 @@ fun OnAirHomeScreen(
                 if (err != null) PillButton("Erneut versuchen", icon = AIcon.Refresh) { onRetry() }
                 PillButton("Playlist hinzufügen") { onAdd() }
             }
-            Spacer(Modifier.weight(1f))
-            Text("Filme und Serien deines Anbieters findest du unter „On Demand“.", color = Muted, fontSize = 14.sp)
+            if (liveCount > 0) GuideUpdateButton(live)
         }
     }
 }
