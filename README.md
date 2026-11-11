@@ -20,7 +20,7 @@ Target device: onn 4K Plus (Google TV, ~2 GB RAM, 32-bit), D-pad remote. Every s
 
 ## Status
 
-**v1.0** (November 2026) – all phases done and approved on the onn 4K Plus.
+**v2.0** (November 2026) – Multiview and a guide update button, on top of v1.0.
 
 | Phase | |
 |---|---|
@@ -30,8 +30,19 @@ Target device: onn 4K Plus (Google TV, ~2 GB RAM, 32-bit), D-pad remote. Every s
 | 3 – Guide in SQLite, "on now" classification (Movie / Show / Sports / Event) | done |
 | 4 – The four "on now" screens | done |
 | 5 – Tuning with a real lineup | done for v1 (keyword tables are data, easy to extend) |
+| **v2:** 6 – "Update guide" button on the home screen | done |
+| 7 – Multiview groundwork (account limits, decoder check, rules, two-stream test) | done |
+| 8 / 9 – Multiview screen and channel picker | done |
+| 10 – Release | done |
 
-The plan, ground rules and the v1.0 design notes are in [CLAUDE.md](CLAUDE.md).
+The plan, ground rules and the v1 / v2 design notes are in [CLAUDE.md](CLAUDE.md).
+
+## What's new in v2
+
+- **Update guide** (home screen): downloads only the TV guide again and re-imports it – never the whole catalog. The line next to it says when the guide was last updated, shows progress while it runs, and – pressed again too soon – why and from when it is possible (at most every 15 minutes, longer after errors or when the provider asks to wait).
+- **Multiview** – two live channels at once. While watching a live channel, OK → **Multiview**; pick the second channel from Live TV, Movies, Shows, Sports, Events or a search (channel names and titles on now) while the first keeps playing in a small window. The two play side by side; **Enlarge screen** makes one large with the other below it. Left/Right (Up/Down when enlarged) moves the selection – the selected screen has the red border and the sound. OK on a screen: Change channel, Pause/Resume, Enlarge/Reduce, Full screen, Remove. Back asks "Exit multiview?" and keeps the selected screen full-screen. Needs an account that allows 2 streams; if the second one is refused, it says so ("Your account allows 2 streams; one may be in use on another device"). Next to a 4K screen a 1080p version of the channel is used when there is one (the onn 4K Plus can't decode two 4K streams reliably).
+- **TV guide** now shows the live preview of the last watched channel in the top-right corner, like the guide inside the player.
+- **Debug screen** additions: account limits (max connections, expiry), the device's video decoders, and a two-stream test (up to 60 s, dropped frames per stream).
 
 ## How "on now" works
 
@@ -43,7 +54,7 @@ The plan, ground rules and the v1.0 design notes are in [CLAUDE.md](CLAUDE.md).
 
 ## Kind to your provider
 
-The playlist (`player_api.php`) and the TV guide (`xmltv.php`) are stored on the device. OnAir downloads them again only on the background schedule — **at most every 12 hours** — or when you press a refresh button. It never downloads on app start or when logging in with an account it already has. The only other regular request is the small PPV-name check above (one category list, at most every 30 minutes). After errors it waits longer each time (15 min up to 12 h) and honours the provider's `Retry-After`; while a provider is throttling, no API calls are sent at all.
+The playlist (`player_api.php`) and the TV guide (`xmltv.php`) are stored on the device. OnAir downloads them again only on the background schedule — **at most every 12 hours** — or when you press a refresh button. It never downloads on app start or when logging in with an account it already has. The only other regular request is the small PPV-name check above (one category list, at most every 30 minutes); the **Update guide** button fetches only the guide, at most every 15 minutes. After errors it waits longer each time (15 min up to 12 h) and honours the provider's `Retry-After`; while a provider is throttling, no API calls are sent at all.
 
 ## Inherited from IPVIO Stream
 

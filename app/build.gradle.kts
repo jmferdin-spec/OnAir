@@ -32,8 +32,8 @@ android {
         applicationId = "com.onair.tv"   // OnAir: installs next to the original IPVIO; Kotlin package stays com.ipvio.stream
         minSdk = 24
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
 
         buildConfigField("String", "TMDB_KEY", "\"${secret("TMDB_KEY")}\"")
         buildConfigField("String", "OMDB_KEY", "\"${secret("OMDB_KEY")}\"")

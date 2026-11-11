@@ -211,10 +211,11 @@ adb -s <onn-4k-plus-ip>:5555 install -r app/build/outputs/apk/release/app-releas
   ./gradlew assembleStaging
   adb -s <onn-4k-plus-ip>:5555 install -r app/build/outputs/apk/staging/app-staging.apk
   ```
+- If the release build reports "Unresolved reference" for basic package symbols (`Bg`, `Text`, `Muted` …) while staging compiles the same sources, the release Kotlin incremental cache is stale (seen once in v2 after switching the Kotlin compile mode): `./gradlew :app:compileReleaseKotlin --rerun`, then build again.
 - **Always build and check a `release` build on the TV before tagging** (launch it, watch `adb logcat` for `FATAL`): R8 problems only show there (v1.0 had two R8 crashes at launch).
 - Build machine: 7.7 GB RAM – `gradle.properties` gives the Gradle daemon 3 GB and caps the Kotlin daemon at 1.5 GB; build cache and configuration cache are on. The PC must not sleep during a build (a 45-minute "build" in v2 was the laptop in standby); the owner set sleep to 30 min when plugged in. Defender exclusions were proposed but not added.
 
-## v2 — plan (2026-11-11)
+## v2 — plan (2026-11-11) — built, release 2.0 pending the owner's final check
 
 Two features: a **force guide update** button and **Multiview** (two live channels at once, like TiviMate). Same ground rules as v1: small verifiable phases, pure logic in `*Logic.kt` with tests, every provider call through `ProviderGuard` / `RefreshLogic`, release build verified on the TV before tagging.
 
@@ -266,6 +267,14 @@ Two features: a **force guide update** button and **Multiview** (two live channe
 - The normal home screen and its Live TV / Movies / Shows / Sports / Events screens and search, in a picker mode: choosing a card or channel returns it to Multiview instead of starting the player. The running stream keeps playing while picking (see questions).
 - Change channel uses the same picker and replaces only that screen.
 - Quality rule from Phase 7 applied when the channel is added.
+
+### State of v2 (2026-11-11)
+
+- Phase 6 (`GuideUpdateLogic`, `RefreshLogic.Trigger.GUIDE`, `Xmltv.updateNow`), Phase 7 (`AccountStore`, `DecoderCaps`, `MultiviewLogic`, two-stream test on the debug screen), Phase 8 + 9 (`Multiview.kt`: session, picker, screens) are built and were checked by the owner on the TV. The picker (Phase 9) was built together with Phase 8.
+- The standalone TV guide shows a live preview of the last watched channel (top right, one stream, `videoView()`), stopped when the guide is left; in the Multiview picker it has no preview (the running stream is in that corner).
+- Not done, by the owner's choice: handing the guide preview's player over to the full-screen player (picking the preview channel restarts it), and the in-player guide's 3-minute auto-close.
+- Audio follows the Multiview selection by muting the other screen (both decode audio) – instant switching; the plan's "no audio renderer while not selected" was dropped.
+- Version 2.0 (versionCode 2).
 
 ### Phase 10 — Tuning and release
 
