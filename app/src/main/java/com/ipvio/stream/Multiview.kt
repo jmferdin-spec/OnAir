@@ -224,7 +224,7 @@ object Multiview {
  * starts. Fix: transparent shutter and keep content on attach – nothing can cover the surface any more.
  */
 @OptIn(UnstableApi::class)
-private fun videoView(c: Context, player: ExoPlayer): PlayerView = PlayerView(c).apply {
+internal fun videoView(c: Context, player: ExoPlayer): PlayerView = PlayerView(c).apply {
     useController = false
     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
     setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -287,6 +287,7 @@ private fun MultiviewPicker(liveAll: List<Item>, onPicked: (Item) -> Unit, onCan
                 liveAll,
                 onWatch = { ch, _ -> onPicked(ch) },
                 onArchive = { ch, _ -> onPicked(ch) },
+                preview = false,   // the running stream is already in this corner – no third stream
                 onClose = { Multiview.page = Multiview.Page.HOME }
             )
             Multiview.Page.NOW -> key(Multiview.pageTile) {

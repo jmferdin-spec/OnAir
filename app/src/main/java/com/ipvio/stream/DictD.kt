@@ -152,4 +152,6 @@ Beenden¦Exit
 Kann ruckeln: zwei 4K-Streams¦May stutter: two 4K streams
 Wiedergabe fehlgeschlagen ({0})¦Playback failed ({0})
 Dein Konto erlaubt nur einen Stream – Multiview ist nicht möglich.¦Your account allows only one stream – Multiview isn't possible.
+# OnAir v2: standalone guide with live preview
+Vorschau nicht verfügbar¦Preview not available
 """
