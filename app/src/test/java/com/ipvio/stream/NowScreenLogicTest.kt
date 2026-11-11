@@ -106,4 +106,28 @@ class NowScreenLogicTest {
         assertEquals(OnNowClass.SPORTS, NowScreenLogic.classOf(OnAirTile.SPORTS))
         assertEquals(OnNowClass.EVENT, NowScreenLogic.classOf(OnAirTile.EVENTS))
     }
+
+    // ------------------------------------------------------------------ Sports navigation
+
+    @Test fun upDownOnTheSportListOnlySwitchTheSport() {
+        val n = 4
+        assertEquals(NowScreenLogic.SportNav.Select(2), NowScreenLogic.sportListKey(NowScreenLogic.NavKey.DOWN, 1, n))
+        assertEquals(NowScreenLogic.SportNav.Select(0), NowScreenLogic.sportListKey(NowScreenLogic.NavKey.UP, 1, n))
+        // the ends of the list: the focus stays in the column (never jumps into the cards)
+        assertEquals(NowScreenLogic.SportNav.Stay, NowScreenLogic.sportListKey(NowScreenLogic.NavKey.UP, 0, n))
+        assertEquals(NowScreenLogic.SportNav.Stay, NowScreenLogic.sportListKey(NowScreenLogic.NavKey.DOWN, 3, n))
+        assertEquals(NowScreenLogic.SportNav.Stay, NowScreenLogic.sportListKey(NowScreenLogic.NavKey.LEFT, 2, n))
+    }
+
+    @Test fun rightOrOkMovesIntoTheCards() {
+        assertEquals(NowScreenLogic.SportNav.EnterCards, NowScreenLogic.sportListKey(NowScreenLogic.NavKey.RIGHT, 2, 4))
+        assertEquals(NowScreenLogic.SportNav.EnterCards, NowScreenLogic.sportListKey(NowScreenLogic.NavKey.OK, 0, 4))
+        assertEquals(NowScreenLogic.SportNav.Pass, NowScreenLogic.sportListKey(NowScreenLogic.NavKey.OTHER, 0, 4))   // Back etc.
+    }
+
+    @Test fun backFromTheCardsReturnsToTheSportList() {
+        assertEquals(NowScreenLogic.SportsBack.SPORT_LIST, NowScreenLogic.sportsBack(panelOpen = false, inCards = true))
+        assertEquals(NowScreenLogic.SportsBack.LEAVE, NowScreenLogic.sportsBack(panelOpen = false, inCards = false))
+        assertEquals(NowScreenLogic.SportsBack.CLOSE_PANEL, NowScreenLogic.sportsBack(panelOpen = true, inCards = true))
+    }
 }

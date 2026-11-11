@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
@@ -61,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * OnAir Phase 4: the Movies, Shows, Sports and Events screens – what is on right now, from [OnNow] snapshots
@@ -85,7 +92,8 @@ fun NowScreen(
     val ctx = LocalContext.current
     var detail by remember { mutableStateOf<OnNowItem?>(null) }
     var detailChan by remember { mutableStateOf<OnNowLogic.Chan?>(null) }   // PPV channel without guide data
-    BackHandler { if (detail != null || detailChan != null) { detail = null; detailChan = null } else onBack() }
+    fun closePanel() { detail = null; detailChan = null; OnAirNav.panelClosed++ }
+    BackHandler { if (detail != null || detailChan != null) closePanel() else onBack() }
 
     var nowSec by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
     LaunchedEffect(Unit) { while (true) { delay(30_000); nowSec = System.currentTimeMillis() / 1000 } }
@@ -107,7 +115,7 @@ fun NowScreen(
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Spinner(Accent2, Modifier.size(48.dp)) }
             } else when (tile) {
                 OnAirTile.MOVIES, OnAirTile.SHOWS -> CardsScreen(tile, s, nowSec, onOpen = { detail = it }, onGuide = onGuide)
-                OnAirTile.SPORTS -> SportsScreen(s, nowSec, onOpen = { detail = it }, onGuide = onGuide)
+                OnAirTile.SPORTS -> SportsScreen(s, nowSec, panelOpen = detail != null, onOpen = { detail = it }, onGuide = onGuide)
                 OnAirTile.EVENTS -> EventsScreen(s, nowSec, onOpen = { detail = it }, onOpenChannel = { detailChan = it }, onGuide = onGuide)
                 OnAirTile.LIVE -> {}
             }
@@ -115,8 +123,8 @@ fun NowScreen(
         val d = detail
         val dc = detailChan
         val zap = remember(snap, tile) { snap?.let { zapList(tile, it) } ?: emptyList() }
-        if (d != null) DetailPanel(d, nowSec, onClose = { detail = null }) { ch -> detail = null; onWatch(ch, zap.ifEmpty { d.sources }) }
-        else if (dc != null) ChannelPanel(dc, onClose = { detailChan = null }) { detailChan = null; onWatch(dc, zap.ifEmpty { listOf(dc) }) }
+        if (d != null) DetailPanel(d, nowSec, onClose = { closePanel() }) { ch -> detail = null; onWatch(ch, zap.ifEmpty { d.sources }) }
+        else if (dc != null) ChannelPanel(dc, onClose = { closePanel() }) { detailChan = null; onWatch(dc, zap.ifEmpty { listOf(dc) }) }
     }
 }
 
@@ -167,24 +175,74 @@ private fun CardsScreen(tile: OnAirTile, s: OnNow.Snapshot, now: Long, onOpen: (
 
 // ====================================================================== Sports
 
+/**
+ * Sports: sport groups on the left, cards of the selected group on the right.
+ * - Up/Down on the left only switch the sport (focus stays in the column; the cards follow).
+ * - Right or OK moves the focus into the cards; Back from the cards returns to the same sport on the left.
+ * Rules in [NowScreenLogic.sportListKey] / [NowScreenLogic.sportsBack].
+ */
 @Composable
-private fun SportsScreen(s: OnNow.Snapshot, now: Long, onOpen: (OnNowItem) -> Unit, onGuide: () -> Unit) {
+private fun SportsScreen(s: OnNow.Snapshot, now: Long, panelOpen: Boolean, onOpen: (OnNowItem) -> Unit, onGuide: () -> Unit) {
     val groups = remember(s, now) { NowScreenLogic.sportGroups(s.items, s.soon, now) }
     if (groups.isEmpty()) { EmptyState("Gerade laufen keine Sportübertragungen", onGuide); return }
     var sel by remember { mutableStateOf(NowScreenLogic.pickSport(groups, OnAirNav.sport)) }
     val sport = NowScreenLogic.pickSport(groups, sel)
     val groupReqs = remember(groups) { groups.associate { it.sport to FocusRequester() } }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val cardTarget = remember { FocusRequester() }
+    var inCards by remember { mutableStateOf(false) }
+
+    val live = remember(s, now, sport) { s.items.filter { it.cls == OnNowClass.SPORTS && it.sport == sport && NowScreenLogic.stillOn(it, now) } }
+    val soon = remember(s, now, sport) { NowScreenLogic.startingSoon(s.soon, now).filter { it.sport == sport } }
+    // Back from the player: the card watched last gets the focus again; otherwise the selected sport on the left
+    val restoreCard = remember {
+        val k = OnAirNav.nowFocus[OnAirTile.SPORTS]
+        k != null && (live + soon).any { NowScreenLogic.key(it) == k }
+    }
+    var autoFocusCards by remember { mutableStateOf(restoreCard) }
+    LaunchedEffect(Unit) { if (!restoreCard) sport?.let { groupReqs[it] }?.let { focusSoon(it) } }
+
+    fun focusRow(sp: Sport) {
+        val i = groups.indexOfFirst { it.sport == sp }
+        scope.launch {
+            if (i >= 0 && listState.layoutInfo.visibleItemsInfo.none { it.index == i }) runCatching { listState.scrollToItem(i) }
+            groupReqs[sp]?.let { focusSoon(it) }
+        }
+    }
+
+    // Back from the cards: to the selected sport (the screen's own Back handler closes panels / leaves otherwise)
+    BackHandler(enabled = NowScreenLogic.sportsBack(panelOpen, inCards) == NowScreenLogic.SportsBack.SPORT_LIST) {
+        NowScreenLogic.pickSport(groups, sel)?.let { focusRow(it) }
+    }
+
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-        LazyColumn(Modifier.width(250.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-            itemsIndexed(groups, key = { _, g -> g.sport.name }) { _, g ->
-                SportRow(NowScreenLogic.groupLabel(g), g.sport == sport, groupReqs.getValue(g.sport)) {
-                    sel = g.sport; OnAirNav.sport = g.sport
-                }
+        LazyColumn(Modifier.width(250.dp).fillMaxHeight(), state = listState, verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+            itemsIndexed(groups, key = { _, g -> g.sport.name }) { i, g ->
+                SportRow(
+                    NowScreenLogic.groupLabel(g), g.sport == sport, groupReqs.getValue(g.sport),
+                    onKey = { k ->
+                        when (val a = NowScreenLogic.sportListKey(k, i, groups.size)) {
+                            is NowScreenLogic.SportNav.Select -> {
+                                val to = groups[a.index].sport
+                                sel = to; OnAirNav.sport = to
+                                focusRow(to)
+                                true
+                            }
+                            NowScreenLogic.SportNav.EnterCards -> {
+                                if (live.isNotEmpty() || soon.isNotEmpty()) scope.launch { focusSoon(cardTarget) }
+                                true
+                            }
+                            NowScreenLogic.SportNav.Stay -> true
+                            NowScreenLogic.SportNav.Pass -> false
+                        }
+                    },
+                    // focus arriving from the cards (Left) lands on the selected sport, not on whatever row is beside the card
+                    onFocused = { val cur = NowScreenLogic.pickSport(groups, sel); if (cur != null && cur != g.sport) groupReqs[cur]?.requestFocus() }
+                )
             }
         }
-        val live = remember(s, now, sport) { s.items.filter { it.cls == OnNowClass.SPORTS && it.sport == sport && NowScreenLogic.stillOn(it, now) } }
-        val soon = remember(s, now, sport) { NowScreenLogic.startingSoon(s.soon, now).filter { it.sport == sport } }
-        Box(Modifier.weight(1f)) {
+        Box(Modifier.weight(1f).onFocusChanged { inCards = it.hasFocus }) {
             androidx.compose.runtime.key(sport) {
                 CardGrid(
                     OnAirTile.SPORTS,
@@ -193,15 +251,18 @@ private fun SportsScreen(s: OnNow.Snapshot, now: Long, onOpen: (OnNowItem) -> Un
                         (if (soon.isNotEmpty()) "Gleich (nächste 60 Min.)" to soon else null)
                     ).map { it.first as String? to it.second },
                     now = now, onOpen = onOpen, posters = false,
-                    fallback = sport?.let { groupReqs[it] }
+                    fallback = null, target = cardTarget,
+                    // switching the sport on the left must not pull the focus into the cards
+                    autoFocus = autoFocusCards, onAutoFocused = { autoFocusCards = false }
                 )
             }
         }
     }
 }
 
+/** One sport group on the left. Keys go to [onKey] first (Up/Down/Right/OK handled there, see [NowScreenLogic.sportListKey]). */
 @Composable
-private fun SportRow(label: String, selected: Boolean, req: FocusRequester, onSelect: () -> Unit) {
+private fun SportRow(label: String, selected: Boolean, req: FocusRequester, onKey: (NowScreenLogic.NavKey) -> Boolean, onFocused: () -> Unit) {
     var f by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(DS.RadiusS)
     Box(
@@ -209,12 +270,27 @@ private fun SportRow(label: String, selected: Boolean, req: FocusRequester, onSe
             .background(if (f) Accent1 else if (selected) Surf2 else Surf)
             .border(if (f) 2.dp else 0.dp, if (f) Color.White else Color.Transparent, shape)
             .focusRequester(req)
-            .onFocusChanged { f = it.isFocused; if (it.isFocused) onSelect() }   // moving the focus selects (D-pad)
-            .clickable { onSelect() }
+            .onFocusChanged { f = it.isFocused; if (it.isFocused) onFocused() }
+            .onPreviewKeyEvent { e ->
+                val k = navKey(e.key)
+                if (k == NowScreenLogic.NavKey.OTHER) return@onPreviewKeyEvent false
+                // act on key-down; swallow the matching key-up so OK does not also "click"
+                if (e.type == KeyEventType.KeyDown) onKey(k) else true
+            }
+            .focusable()
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         Text(label, color = if (f) OnAccent else Color.White, fontSize = 18.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
+}
+
+private fun navKey(k: Key): NowScreenLogic.NavKey = when (k) {
+    Key.DirectionUp -> NowScreenLogic.NavKey.UP
+    Key.DirectionDown -> NowScreenLogic.NavKey.DOWN
+    Key.DirectionLeft -> NowScreenLogic.NavKey.LEFT
+    Key.DirectionRight -> NowScreenLogic.NavKey.RIGHT
+    Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> NowScreenLogic.NavKey.OK
+    else -> NowScreenLogic.NavKey.OTHER
 }
 
 // ====================================================================== Events
@@ -235,14 +311,14 @@ private fun EventsScreen(s: OnNow.Snapshot, now: Long, onOpen: (OnNowItem) -> Un
         ).map { it.first as String? to it.second },
         now = now, onOpen = onOpen, posters = false, fallback = null,
         extraKeys = e.channels.map { "ppv_" + it.id },
-        extra = if (e.channels.isEmpty() && e.hiddenPlaceholders == 0) null else { scope, targetKey, target ->
+        extra = if (e.channels.isEmpty() && e.hiddenPlaceholders == 0) null else { scope, focusMod ->
             scope.item(span = { GridItemSpan(maxLineSpan) }, key = "h_ppv") {
                 SectionHeader("PPV-Sender", if (e.hiddenPlaceholders > 0) "${e.hiddenPlaceholders} leere PPV-Plätze ausgeblendet" else null)
             }
             for (c in e.channels) {
                 val k = "ppv_" + c.id
                 scope.item(key = k) {
-                    ChannelCard(c, focusKey = k, modifier = if (k == targetKey) Modifier.focusRequester(target) else Modifier) { onOpenChannel(c) }
+                    ChannelCard(c, focusKey = k, modifier = focusMod(k)) { onOpenChannel(c) }
                 }
             }
         }
@@ -265,10 +341,18 @@ private fun CardGrid(
     fallback: FocusRequester?,
     /** Keys of the items [extra] adds after the sections (in order, after one header). */
     extraKeys: List<String> = emptyList(),
-    extra: ((LazyGridScope, String?, FocusRequester) -> Unit)? = null
+    /** Focus target (the restored or first card); pass one to move the focus into the grid from outside. */
+    target: FocusRequester? = null,
+    /** Take the focus when shown (false: only scroll to the restored card – the Sports list keeps the focus). */
+    autoFocus: Boolean = true,
+    onAutoFocused: () -> Unit = {},
+    extra: ((LazyGridScope, (String) -> Modifier) -> Unit)? = null
 ) {
     val state = rememberLazyGridState()
-    val target = remember { FocusRequester() }
+    val ownTarget = remember { FocusRequester() }
+    val target = target ?: ownTarget
+    // one focus handle per card, so the card a detail panel was opened from can take the focus back
+    val reqs = remember { HashMap<String, FocusRequester>() }
     val remembered = remember(tile) { OnAirNav.nowFocus[tile] }
     val all = sections.flatMap { it.second }
     val keys = remember(sections, extraKeys) { all.map { NowScreenLogic.key(it) } + extraKeys }
@@ -283,9 +367,22 @@ private fun CardGrid(
         if (found < 0 && targetKey != null && targetKey in extraKeys) found = idx + 1 + extraKeys.indexOf(targetKey)
         found
     }
+    fun focusMod(k: String): Modifier {
+        val m = Modifier.focusRequester(reqs.getOrPut(k) { FocusRequester() })
+        return if (k == targetKey) m.focusRequester(target) else m
+    }
+    // a detail panel closed: back to the card it was opened from (the card focused last)
+    val closed = OnAirNav.panelClosed
+    val closedAtStart = remember { closed }   // only closes while this grid is shown (Sports rebuilds it per sport)
+    LaunchedEffect(closed) {
+        if (closed == closedAtStart) return@LaunchedEffect
+        OnAirNav.nowFocus[tile]?.let { reqs[it] }?.let { focusSoon(it) }
+    }
     LaunchedEffect(tile) {
         if (targetIndex > 0) runCatching { state.scrollToItem(targetIndex) }
+        if (!autoFocus) return@LaunchedEffect
         if (targetKey != null) focusSoon(target) else fallback?.let { focusSoon(it) }
+        onAutoFocused()
     }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 228.dp),
@@ -302,13 +399,13 @@ private fun CardGrid(
                 item(key = k) {
                     NowCard(
                         it, now, posters,
-                        modifier = if (k == targetKey) Modifier.focusRequester(target) else Modifier,
+                        modifier = focusMod(k),
                         onFocus = { OnAirNav.nowFocus[tile] = k }
                     ) { onOpen(it) }
                 }
             }
         }
-        extra?.invoke(this, targetKey, target)
+        extra?.invoke(this, ::focusMod)
     }
 }
 

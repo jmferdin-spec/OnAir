@@ -80,6 +80,43 @@ object NowScreenLogic {
     fun pickSport(groups: List<SportGroup>, remembered: Sport?): Sport? =
         groups.firstOrNull { it.sport == remembered }?.sport ?: groups.firstOrNull()?.sport
 
+    /** Remote keys the Sports screen cares about. */
+    enum class NavKey { UP, DOWN, LEFT, RIGHT, OK, OTHER }
+
+    /** What a key does on the sport list (left column). */
+    sealed class SportNav {
+        /** Move the focus to row [index] and show that sport's cards – focus stays in the left column. */
+        data class Select(val index: Int) : SportNav()
+        /** Consume the key, nothing changes (top/bottom of the list, Left). */
+        object Stay : SportNav()
+        /** Move the focus into the cards (Right or OK). */
+        object EnterCards : SportNav()
+        /** Not ours: let the system handle it (Back etc.). */
+        object Pass : SportNav()
+    }
+
+    /**
+     * Sport list navigation: Up/Down only switch the sport (never leave the column, never jump into the cards),
+     * Right / OK move into the cards.
+     */
+    fun sportListKey(key: NavKey, index: Int, size: Int): SportNav = when (key) {
+        NavKey.UP -> if (index > 0) SportNav.Select(index - 1) else SportNav.Stay
+        NavKey.DOWN -> if (index < size - 1) SportNav.Select(index + 1) else SportNav.Stay
+        NavKey.RIGHT, NavKey.OK -> if (size > 0) SportNav.EnterCards else SportNav.Stay
+        NavKey.LEFT -> SportNav.Stay
+        NavKey.OTHER -> SportNav.Pass
+    }
+
+    /** Where Back goes on the Sports screen. */
+    enum class SportsBack { CLOSE_PANEL, SPORT_LIST, LEAVE }
+
+    /** Back: closes an open panel first, from the cards returns to the selected sport on the left, else leaves the screen. */
+    fun sportsBack(panelOpen: Boolean, inCards: Boolean): SportsBack = when {
+        panelOpen -> SportsBack.CLOSE_PANEL
+        inCards -> SportsBack.SPORT_LIST
+        else -> SportsBack.LEAVE
+    }
+
     /** Left-column label: "NFL 3", "Soccer 7 · 2 bald" (German source; "bald" = soon). */
     fun groupLabel(g: SportGroup): String = when {
         g.soon == 0 -> "${g.sport.label} ${g.live}"

@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -68,6 +69,8 @@ object OnAirNav {
     var sport: Sport? = null
     /** Movies / Shows sort order (toggle on the screen). */
     var sort by mutableStateOf(NowScreenLogic.Sort.RECENT)
+    /** Counts up when a "now" detail panel closes: the card it was opened from takes the focus back. */
+    var panelClosed by mutableIntStateOf(0)
 
     fun openTile(t: OnAirTile) {
         tile = t
