@@ -67,10 +67,24 @@ class OnNowLogicTest {
         assertEquals(OnNowClass.EVENT, cls("Event Starts 9PM ET", "US| EVENTS"))
         assertEquals(OnNowClass.EVENT, cls("Championship Rematch", "US| PAY-PER-VIEW"))
         assertEquals(OnNowClass.EVENT, cls("Live Card", "COMBAT", name = "UFC PPV 1"))
-        assertEquals(OnNowClass.EVENT, cls("Dual Meet", "US| SPORTS", name = "FLO SPORTS 04"))
+        assertEquals(OnNowClass.EVENT, cls("Dual Meet", "US| FLOSPORTS", name = "FLO SPORTS 04"))
         assertEquals(OnNowClass.EVENT, cls("Gran Velada", "LATINO| EVENTOS"))
         // "Eventually" is not "EVENT"
         assertEquals(OnNowClass.SHOW, cls("Eventually Home", "US| ENTERTAINMENT", name = "Eventually TV"))
+    }
+
+    @Test fun mainEventInTheChannelNameIsNotAnEvent() {
+        // Reported: "Sports Desk" on "UHD: Sky Sports Main Event 4K" (Xtream category UHD/4K) was the only live Event
+        assertTrue(OnNowLogic.classify(prog("Sports Desk"), chan("UHD: Sky Sports Main Event 4K", "UHD/4K")) != OnNowClass.EVENT)
+        assertEquals(OnNowClass.SPORTS, cls("Sports Desk", "UK| SPORTS", name = "Sky Sports Main Event HD"))
+        assertTrue(cls("Big Night Live", "US| ENTERTAINMENT", name = "Event TV") != OnNowClass.EVENT)
+        // A channel name only counts with an unmistakable PPV pattern
+        assertEquals(OnNowClass.EVENT, cls("Title Fight", "US| SPORTS", name = "PPV 01"))
+        assertEquals(OnNowClass.EVENT, cls("Title Fight", "US| SPORTS", name = "PPV: Ring Kings"))
+        assertEquals(OnNowClass.EVENT, cls("Title Fight", "US| SPORTS", name = "PPV07"))
+        assertEquals(OnNowClass.EVENT, cls("Title Fight", "US| SPORTS", name = "Boxing Pay-Per-View 2"))
+        // FloSports by its category only, not by "Flo" in a name
+        assertEquals(OnNowClass.SPORTS, cls("Dual Meet", "US| SPORTS", name = "FLO SPORTS 04"))
     }
 
     // ------------------------------------------------------------------ 2. Sports
@@ -269,17 +283,46 @@ class OnNowLogicTest {
     private fun ev(name: String, group: String = "PPV EVENTS", tvg: String? = null, id: String = name) = Chan(id, name, group, tvgId = tvg)
 
     @Test fun eventChannelDetection() {
-        assertTrue(OnNowLogic.isEventChannel(ev("PPV 3", group = "US| SPORTS")))
-        assertTrue(OnNowLogic.isEventChannel(ev("Ring Night", group = "US| PAY PER VIEW")))
-        assertTrue(OnNowLogic.isEventChannel(ev("Flo Sports 12", group = "SPORTS")))
+        assertTrue(OnNowLogic.isEventChannel(ev("PPV 3", group = "US| SPORTS")))              // clear PPV name
+        assertTrue(OnNowLogic.isEventChannel(ev("Ring Night", group = "US| PAY PER VIEW")))   // PPV category
+        assertTrue(OnNowLogic.isEventChannel(ev("Fight Card 2", group = "LATINO| EVENTOS")))
+        assertTrue(OnNowLogic.isEventChannel(ev("Track Meet 12", group = "US| FLOSPORTS")))
+        assertFalse(OnNowLogic.isEventChannel(ev("Flo Sports 12", group = "SPORTS")))
         assertFalse(OnNowLogic.isEventChannel(ev("Sports Net 1", group = "SPORTS NETWORKS")))
+        assertFalse(OnNowLogic.isEventChannel(ev("UHD: Sky Sports Main Event 4K", group = "UHD/4K")))
+        assertFalse(OnNowLogic.isEventChannel(ev("Eventos Deportivos TV", group = "LATINO| DEPORTES")))
+        assertFalse(OnNowLogic.isEventChannel(ev("Hoppv Kids", group = "US| KIDS")))           // "PPV" only as a whole word
+    }
+
+    @Test fun ppvCategoryAndNameRules() {
+        for (g in listOf("US| PPV", "PPV EVENTS", "UFC PPV", "US| PAY-PER-VIEW", "LIVE EVENTS", "DAZN| EVENTS", "MX| EVENTOS", "FLO SPORTS"))
+            assertTrue(g, OnNowLogic.isPpvCategory(g))
+        for (g in listOf("UHD/4K", "US| SPORTS", "UK| ENTERTAINMENT", "PREVENTION TV", "US| EVENTUALLY"))
+            assertFalse(g, OnNowLogic.isPpvCategory(g))
+        for (n in listOf("PPV 01", "PPV:", "PPV: UFC 310", "US: PPV 5", "PPV07", "UFC PPV", "Pay Per View 3", "DAZN PPV 2"))
+            assertTrue(n, OnNowLogic.isPpvName(n))
+        for (n in listOf("Main Event", "Sky Sports Main Event", "Event 1", "Events HD", "Flo Sports 4", "Eventos 3"))
+            assertFalse(n, OnNowLogic.isPpvName(n))
+    }
+
+    @Test fun ppvPlaceholderSlots() {
+        for (n in listOf("PPV 23", "PPV 01", "US: PPV 05 HD", "UK | PPV 7", "[US] PPV 12", "PPV07", "PPV 12 Backup", "Pay Per View 3",
+            "PPV 23: No Event", "PPV 4 - TBA", "Event 15", "EVENTOS 2 FHD"))
+            assertTrue(n, OnNowLogic.isPpvPlaceholderName(n))
+        for (n in listOf("PPV 01: UFC 310 Pantoja vs Asakura", "PPV 3 | Canelo vs Berlanga", "UFC PPV", "Ring Night", "DAZN PPV 2",
+            "US: PPV 5 - Title Fight Night"))
+            assertFalse(n, OnNowLogic.isPpvPlaceholderName(n))
+        assertTrue(Chan("a", "PPV 23", "US| PPV").ppvPlaceholder)
+        assertFalse(Chan("b", "PPV 01: Title Fight", "US| PPV").ppvPlaceholder)
+        assertFalse(Chan("c", "Event 15", "US| ENTERTAINMENT").ppvPlaceholder)              // not a PPV channel at all
     }
 
     @Test fun ppvChannelsWithoutGuideStayReachableWithTheirName() {
         val chans = listOf(
-            ev("PPV 10"), ev("PPV 2"), ev("PPV 1", tvg = "ppv1.us"),
-            ev("PPV 3", tvg = "ppv3.us"),                       // has rows, but only a placeholder
+            ev("PPV 10: Ring Kings"), ev("PPV 2 | Title Fight Night"), ev("PPV 1", tvg = "ppv1.us"),
+            ev("PPV 3: Cage Masters", tvg = "ppv3.us"),         // has rows, but only a placeholder
             ev("UFC PPV 4", tvg = "ufc4.us"),                   // event coming up tonight
+            ev("PPV 11"), ev("PPV 12 HD"), ev("PPV 13"),        // empty slots: hidden, counted
             chan("Sports Net", "SPORTS NETWORKS")               // not an event channel
         )
         val byTvg = OnNowLogic.run { chans.filter { it.tvgId != null }.groupBy { it.tvgId!! } }
@@ -291,8 +334,37 @@ class OnNowLogicTest {
         val e = OnNowLogic.events(onNow, next, chans, now)
         assertEquals(listOf("Prelims Live"), e.live.map { it.title })
         assertEquals(listOf("Main Card: Champion vs Challenger"), e.upcoming.map { it.title })
-        // everything else that is a PPV channel, natural order, channel name as title
-        assertEquals(listOf("PPV 2", "PPV 3", "PPV 10"), e.channels.map { OnNowLogic.eventTitle(it) })
+        // everything else that is a PPV channel with an event name, natural order, channel name as title
+        assertEquals(listOf("PPV 2 | Title Fight Night", "PPV 3: Cage Masters", "PPV 10: Ring Kings"), e.channels.map { OnNowLogic.eventTitle(it) })
+        assertEquals(3, e.hiddenPlaceholders)
+        // the same through the per-playlist index
+        val idx = OnNowLogic.EventIndex(chans)
+        val e2 = OnNowLogic.events(onNow, next, idx, now)
+        assertEquals(e.channels, e2.channels); assertEquals(3, e2.hiddenPlaceholders)
+    }
+
+    @Test fun placeholderSlotWithAnEventOnNowIsListedLive() {
+        val chans = listOf(ev("PPV 23", tvg = "ppv23.us"), ev("PPV 24"))
+        val byTvg = mapOf("ppv23.us" to listOf(chans[0]))
+        val e = OnNowLogic.events(OnNowLogic.build(listOf(prog("Main Card: Champion vs Challenger", tvg = "ppv23.us")), byTvg, now), emptyList(), chans, now)
+        assertEquals(listOf("Main Card: Champion vs Challenger"), e.live.map { it.title })
+        assertEquals(0, e.channels.size)
+        assertEquals(1, e.hiddenPlaceholders)                 // only PPV 24 (nothing listed)
+    }
+
+    @Test fun eventIndexCountsCategoriesOnce() {
+        val chans = listOf(
+            ev("PPV 2", group = "US| PPV"), ev("PPV 10", group = "US| PPV"), ev("PPV 1", group = "US| PPV", tvg = "PPV1.US"),
+            ev("Fight Card", group = "LATINO| EVENTOS"),
+            ev("PPV 5: Title Night", group = "US| SPORTS"),       // by name only
+            chan("UHD: Sky Sports Main Event 4K", "UHD/4K"), chan("News 1", "US| NEWS")
+        )
+        val idx = OnNowLogic.EventIndex(chans)
+        assertEquals(listOf("Fight Card", "PPV 1", "PPV 2", "PPV 5: Title Night", "PPV 10"), idx.channels.map { it.name })
+        assertEquals(listOf("US| PPV" to 3, "LATINO| EVENTOS" to 1), idx.categories)
+        assertEquals(1, idx.byNameOnly)
+        assertEquals(3, idx.placeholders)
+        assertEquals(setOf("ppv1.us"), idx.tvgIds)
     }
 
     @Test fun upcomingIsSoonestFirstWithinTheWindow() {
@@ -307,11 +379,22 @@ class OnNowLogicTest {
 
     @Test fun naturalSort() {
         assertEquals(listOf("PPV 1", "PPV 2", "PPV 10", "PPV 10 HD", "ppv 11"), listOf("PPV 10", "ppv 11", "PPV 2", "PPV 10 HD", "PPV 1").sortedWith(OnNowLogic.NATURAL))
+        assertEquals(listOf("PPV 1", "PPV 01", "PPV 2", "PPV 0010", "PPV 99999999999999999999"),
+            listOf("PPV 99999999999999999999", "PPV 0010", "PPV 2", "PPV 01", "PPV 1").sortedWith(OnNowLogic.NATURAL))
+    }
+
+    @Test fun sharedProgrammeTextsGiveTheSameResult() {
+        val p = prog("Fútbol: América vs. Chivas", cats = listOf("Sports"))
+        val c1 = chan("TUDN HD", "LATINO| DEPORTES"); val c2 = chan("TUDN 4K", "LATINO| DEPORTES", q = "4K")
+        val pt = OnNowLogic.ProgText(p)
+        assertEquals(OnNowLogic.classify(OnNowLogic.Facts(p, c1)), OnNowLogic.classify(OnNowLogic.Facts(pt, c1)))
+        assertEquals(Sport.SOCCER, OnNowLogic.sportOf(OnNowLogic.Facts(pt, c2)))
+        assertEquals(OnNowLogic.mergeKey(p), pt.mergeKey)
     }
 
     @Test fun keywordTablesAreData() {
         // tuning happens in the tables; make sure the important ones are not empty and normalise cleanly
-        for (l in listOf(OnNowLogic.EVENT_WORDS, OnNowLogic.MOVIE_GROUP_PARTS, OnNowLogic.SHOW_CATEGORY_PARTS, OnNowLogic.PLACEHOLDER_TITLES)) {
+        for (l in listOf(OnNowLogic.PPV_CATEGORY_WORDS, OnNowLogic.PPV_NAME_WORDS, OnNowLogic.PPV_SLOT_WORDS, OnNowLogic.MOVIE_GROUP_PARTS, OnNowLogic.SHOW_CATEGORY_PARTS, OnNowLogic.PLACEHOLDER_TITLES)) {
             assertTrue(l.isNotEmpty())
             for (k in l) assertTrue(k, OnNowLogic.norm(k).isNotEmpty())
         }

@@ -51,18 +51,54 @@ object OnNowLogic {
         val subTitle: String? = null, val desc: String? = null
     )
 
-    /** A live channel: [group] = Xtream category name, [catId] = Xtream category_id, [quality] = "4K"/"FHD"/"HD"/null. */
+    /**
+     * A live channel: [group] = Xtream category name, [catId] = Xtream category_id, [quality] = "4K"/"FHD"/"HD"/null.
+     * The normalised texts and the PPV flags are computed once when the channel is created – the "now" screens build their
+     * channels once per playlist (see OnNow), not on every refresh.
+     */
     data class Chan(
         val id: String, val name: String, val group: String, val catId: String? = null,
         val quality: String? = null, val logo: String? = null, val tvgId: String? = null
-    )
+    ) {
+        internal val nName: String = pad(norm(name))
+        internal val nGroup: String = pad(norm(group))
+        /** The Xtream category is a PPV / event category ("US| PPV", "PAY PER VIEW", "LIVE EVENTS" …). */
+        val ppvCategory: Boolean = isPpvCategoryText(nGroup)
+        /** The channel name is clearly a PPV slot ("PPV 01", "PPV: …", "UFC PPV") – never just "Event" / "Main Event". */
+        val ppvName: Boolean = isPpvNameText(nName)
+        /** PPV / event channel: Event rule 1 of [classify], and listed on the Events screen. */
+        val isEvent: Boolean get() = ppvCategory || ppvName
+        /** A PPV slot without an event name ("PPV 23", "US: PPV 05 HD"): hidden from the "PPV channels" list, only counted. */
+        val ppvPlaceholder: Boolean = (ppvCategory || ppvName) && isPpvPlaceholderName(name)
+    }
 
     // ================================================================== keyword tables (tune here)
 
-    /** Channel name or Xtream category → Event. */
-    val EVENT_WORDS = listOf(
-        "PPV", "PAY PER VIEW", "EVENT", "EVENTS", "UFC PPV", "BOXING PPV", "WWE PPV", "DAZN PPV",
-        "FLO", "FLOSPORTS", "FLO SPORTS", "EVENTO", "EVENTOS"
+    /**
+     * Xtream category (whole words) → PPV / event channel. The main signal: providers file PPV and event slots in their own
+     * categories. "EVENTS" is fine here (a category named "US| EVENTS"), but never in a channel name – see [PPV_NAME_WORDS].
+     */
+    val PPV_CATEGORY_WORDS = listOf(
+        "PPV", "PAY PER VIEW", "PAYPERVIEW", "EVENT", "EVENTS", "LIVE EVENTS", "SPORTS EVENTS", "EVENTO", "EVENTOS",
+        "UFC PPV", "BOXING PPV", "WWE PPV", "DAZN PPV", "FLO", "FLOSPORTS", "FLO SPORTS"
+    )
+
+    /**
+     * Channel name (whole words) → PPV slot, only unmistakable PPV patterns: "PPV 01", "PPV: …", "UFC PPV", "Pay Per View".
+     * Deliberately NOT "Event" / "Main Event" ("Sky Sports Main Event" is a normal sports channel). "PPV01" is matched by
+     * [PPV_NUMBERED].
+     */
+    val PPV_NAME_WORDS = listOf("PPV", "PAY PER VIEW", "PAYPERVIEW")
+    /** "PPV01", "PPV12" written together (on the padded, normalised name). */
+    val PPV_NUMBERED = Regex("""\sPPV\d{1,4}\s""")
+
+    /**
+     * Words of a PPV slot name that are not an event name. A PPV channel whose name has nothing else (after a "US:" / "UK |"
+     * prefix and numbers) is a placeholder slot, e.g. "PPV 23", "US: PPV 05 HD", "PPV 12 Backup".
+     */
+    val PPV_SLOT_WORDS = listOf(
+        "PPV", "PAY", "PER", "VIEW", "PAYPERVIEW", "EVENT", "EVENTS", "EVENTO", "EVENTOS", "CHANNEL", "CANAL", "CH", "LIVE",
+        "BACKUP", "ALT", "FEED", "STREAM", "HD", "FHD", "UHD", "4K", "SD", "HEVC", "H265", "RAW", "VIP", "PLUS"
     )
 
     /** Title or EPG category → Other, checked before Sports (a sports channel's infomercial is not a game). */
@@ -185,7 +221,11 @@ object OnNowLogic {
     private fun words(raw: List<String>) = raw.map { pad(norm(it)) }
     private fun parts(raw: List<String>) = raw.map { norm(it) }
 
-    private val eventW = words(EVENT_WORDS)
+    private val ppvCatW by lazy { words(PPV_CATEGORY_WORDS) }
+    private val ppvNameW by lazy { words(PPV_NAME_WORDS) }
+    private val slotWords by lazy { PPV_SLOT_WORDS.map { norm(it) }.toHashSet() }
+    private val COUNTRY_PREFIX = Regex("""^\s*(?:\[[A-Za-z]{2,3}\]|[A-Za-z]{2,3}\s*[:|]|[A-Za-z]{2,3}\s+-)\s*""")
+    private val NUMBERISH = Regex("""\d+(?:ST|ND|RD|TH)?|PPV\d+""")
     private val junkW = words(JUNK_WORDS)
     private val sportCatP = parts(SPORT_CATEGORY_PARTS)
     private val sportCatW = words(SPORT_CATEGORY_WORDS)
@@ -198,7 +238,7 @@ object OnNowLogic {
     private val showCatP = parts(SHOW_CATEGORY_PARTS)
     private val entGroupP = parts(ENTERTAINMENT_GROUP_PARTS)
     private val entGroupW = words(ENTERTAINMENT_GROUP_WORDS)
-    private val placeholders = PLACEHOLDER_TITLES.map { norm(it) }.toHashSet()
+    private val placeholders by lazy { PLACEHOLDER_TITLES.map { norm(it) }.toHashSet() }
 
     private fun anyWord(text: String, list: List<String>) = list.any { text.contains(it) }
     private fun anyPart(text: String, list: List<String>) = list.any { text.contains(it) }
@@ -209,6 +249,29 @@ object OnNowLogic {
         val n = norm(title)
         return n.isEmpty() || n in placeholders
     }
+
+    /** [nGroup] = padded [norm] of an Xtream category. */
+    internal fun isPpvCategoryText(nGroup: String): Boolean = anyWord(nGroup, ppvCatW)
+
+    /** [nName] = padded [norm] of a channel name. */
+    internal fun isPpvNameText(nName: String): Boolean = anyWord(nName, ppvNameW) || PPV_NUMBERED.containsMatchIn(nName)
+
+    fun isPpvCategory(group: String): Boolean = isPpvCategoryText(pad(norm(group)))
+    fun isPpvName(name: String): Boolean = isPpvNameText(pad(norm(name)))
+
+    /**
+     * The name of a PPV channel without an event in it: what is left after the country prefix, numbers and [PPV_SLOT_WORDS]
+     * is empty, or only a placeholder text ("PPV 23: No Event").
+     */
+    fun isPpvPlaceholderName(name: String): Boolean {
+        val tokens = norm(name.replace(COUNTRY_PREFIX, "")).split(' ').filter { it.isNotEmpty() && !NUMBERISH.matches(it) }
+        if (tokens.none { it !in slotWords }) return true
+        // "PPV 23: No Event" – what follows the PPV words is a placeholder text (its "EVENT" is a slot word, so check it whole)
+        val rest = tokens.filter { it !in ppvWordsOnly }.joinToString(" ")
+        return rest in placeholders
+    }
+
+    private val ppvWordsOnly by lazy { setOf("PPV", "PAY", "PER", "VIEW", "PAYPERVIEW") }
 
     // ================================================================== on-now window and progress
 
@@ -227,14 +290,26 @@ object OnNowLogic {
 
     // ================================================================== classification
 
-    /** Pre-normalised texts of one programme on one channel (padded with spaces for whole-word matching). */
-    class Facts(val prog: Prog, chan: Chan) {
-        val title = pad(norm(prog.title))
+    /** Normalised texts of one programme, computed once and shared by all channels that carry it. */
+    class ProgText(val prog: Prog) {
+        val nTitle: String = norm(prog.title)
+        val title = pad(nTitle)
         val cats = pad(prog.categories.joinToString(" ") { norm(it) })
-        val name = pad(norm(chan.name))
-        val group = pad(norm(chan.group))
-        val all = title + cats + name + group
-        val minutes = ((prog.stop - prog.start) / 60).toInt()
+        val gameTitle: Boolean = GAME_TITLE.containsMatchIn(prog.title)
+        val placeholder: Boolean = nTitle.isEmpty() || nTitle in placeholders
+        val mergeKey: String = nTitle.ifEmpty { prog.title.trim().lowercase() } + "\u0001" + prog.start
+    }
+
+    /** Pre-normalised texts of one programme on one channel (padded with spaces for whole-word matching). */
+    class Facts(val pt: ProgText, val chan: Chan) {
+        constructor(prog: Prog, chan: Chan) : this(ProgText(prog), chan)
+        val prog: Prog get() = pt.prog
+        val title: String get() = pt.title
+        val cats: String get() = pt.cats
+        val name: String get() = chan.nName
+        val group: String get() = chan.nGroup
+        val all: String by lazy(LazyThreadSafetyMode.NONE) { pt.title + pt.cats + chan.nName + chan.nGroup }
+        val minutes = ((pt.prog.stop - pt.prog.start) / 60).toInt()
     }
 
     private fun hasSportKeyword(f: Facts): Boolean =
@@ -242,14 +317,14 @@ object OnNowLogic {
 
     private fun isSports(f: Facts): Boolean =
         anyPart(f.cats, sportCatP) || anyWord(f.cats, sportCatW) || anyPart(f.group, sportGroupP) ||
-            (GAME_TITLE.containsMatchIn(f.prog.title) && hasSportKeyword(f))
+            (f.pt.gameTitle && hasSportKeyword(f))
 
     /** Class of [prog] on [chan]; null = placeholder title (shown nowhere). */
     fun classify(prog: Prog, chan: Chan): OnNowClass? = if (isPlaceholder(prog.title)) null else classify(Facts(prog, chan))
 
     fun classify(f: Facts): OnNowClass {
         val p = f.prog
-        if (anyWord(f.name, eventW) || anyWord(f.group, eventW)) return OnNowClass.EVENT
+        if (f.chan.isEvent) return OnNowClass.EVENT
         if (anyWord(f.title, junkW) || anyWord(f.cats, junkW)) return OnNowClass.OTHER
         if (isSports(f)) return OnNowClass.SPORTS
         if (anyWord(f.cats, otherCatW) || anyWord(f.title, otherTitleW) || anyWord(f.group, otherGroupW)) return OnNowClass.OTHER
@@ -293,11 +368,13 @@ object OnNowLogic {
         class Acc(var cls: OnNowClass, var best: Facts, val sources: LinkedHashMap<String, Chan>)
         val acc = LinkedHashMap<String, Acc>()
         for (p in progs) {
-            if (!include(p) || isPlaceholder(p.title)) continue
-            val chans = chansByTvg[p.tvgId.lowercase()] ?: continue
-            val key = mergeKey(p)
+            if (!include(p)) continue
+            val chans = chansByTvg[p.tvgId] ?: chansByTvg[p.tvgId.lowercase()] ?: continue
+            val pt = ProgText(p)
+            if (pt.placeholder) continue
+            val key = pt.mergeKey
             for (ch in chans) {
-                val f = Facts(p, ch)
+                val f = Facts(pt, ch)
                 val c = classify(f)
                 val a = acc[key]
                 if (a == null) acc[key] = Acc(c, f, linkedMapOf(ch.id to ch))
@@ -319,42 +396,88 @@ object OnNowLogic {
 
     // ================================================================== events
 
-    /** PPV / event channel by its name or Xtream category (rule 1 of [classify]). */
-    fun isEventChannel(chan: Chan): Boolean = anyWord(pad(norm(chan.name)), eventW) || anyWord(pad(norm(chan.group)), eventW)
+    /** PPV / event channel: a PPV/event Xtream category, or an unmistakable PPV name (rule 1 of [classify]). */
+    fun isEventChannel(chan: Chan): Boolean = chan.isEvent
 
     private val RUNS = Regex("""\d+|\D+""")
 
-    /** "PPV 2" before "PPV 10": compares runs of digits as numbers. */
-    val NATURAL: Comparator<String> = Comparator { a, b ->
-        val ra = RUNS.findAll(a.lowercase()).map { it.value }.toList()
-        val rb = RUNS.findAll(b.lowercase()).map { it.value }.toList()
-        for (i in 0 until minOf(ra.size, rb.size)) {
-            val x = ra[i]; val y = rb[i]
-            val c = if (x[0].isDigit() && y[0].isDigit()) (x.toBigInteger().compareTo(y.toBigInteger())).let { if (it != 0) it else x.length - y.length }
-            else x.compareTo(y)
-            if (c != 0) return@Comparator c
+    /** "PPV 2" before "PPV 10": compares runs of digits as numbers. For many items sort by a precomputed key ([EventIndex]). */
+    val NATURAL: Comparator<String> = Comparator { a, b -> NatKey(a).compareTo(NatKey(b)) }
+
+    /**
+     * The Events screen: live now, coming up (next 24 h), and PPV channels with nothing listed that have an event name.
+     * [hiddenPlaceholders] = PPV slots with nothing listed and no event name ("PPV 23"): not shown, only counted.
+     */
+    class Events(val live: List<OnNowItem>, val upcoming: List<OnNowItem>, val channels: List<Chan>, val hiddenPlaceholders: Int = 0)
+
+    /** Natural-order sort key, computed once per channel: text runs, and digit runs compared as numbers. */
+    private class NatKey(s: String) : Comparable<NatKey> {
+        private val runs: List<String> = RUNS.findAll(s.lowercase()).map { it.value }.toList()
+        override fun compareTo(other: NatKey): Int {
+            val a = runs; val b = other.runs
+            for (i in 0 until minOf(a.size, b.size)) {
+                val x = a[i]; val y = b[i]
+                val c = if (x[0].isDigit() && y[0].isDigit()) {
+                    val xs = x.trimStart('0'); val ys = y.trimStart('0')
+                    when { xs.length != ys.length -> xs.length - ys.length; xs != ys -> xs.compareTo(ys); else -> x.length - y.length }
+                } else x.compareTo(y)
+                if (c != 0) return c
+            }
+            return a.size - b.size
         }
-        ra.size - rb.size
     }
 
-    /** The Events screen: live now, coming up (next 24 h), and PPV channels with nothing listed. */
-    class Events(val live: List<OnNowItem>, val upcoming: List<OnNowItem>, val channels: List<Chan>)
+    /**
+     * The PPV / event channels of one playlist, prepared once per playlist load (not on every refresh): natural order by
+     * name, by tvg-id for "coming up", and the numbers for the debug screen.
+     */
+    class EventIndex(allChans: List<Chan>) {
+        /** All PPV / event channels, natural order by name ("PPV 2" before "PPV 10"). */
+        val channels: List<Chan>
+        /** Event channels by lower-case tvg-id. */
+        val byTvg: Map<String, List<Chan>>
+        val tvgIds: Set<String> get() = byTvg.keys
+        /** PPV categories: Xtream category name → event channels in it, most channels first. */
+        val categories: List<Pair<String, Int>>
+        /** Event channels found only by a PPV name, in a category that is not a PPV category. */
+        val byNameOnly: Int
+        /** Event channels that are placeholder slots ("PPV 23"). */
+        val placeholders: Int
+
+        init {
+            channels = allChans.filter { it.isEvent }.map { it to NatKey(it.name) }.sortedBy { it.second }.map { it.first }
+            val m = HashMap<String, MutableList<Chan>>()
+            for (c in channels) { val k = c.tvgId?.trim()?.lowercase()?.ifEmpty { null } ?: continue; m.getOrPut(k) { ArrayList(2) }.add(c) }
+            byTvg = m
+            categories = channels.filter { it.ppvCategory }.groupingBy { it.group }.eachCount().entries
+                .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key }).map { it.key to it.value }
+            byNameOnly = channels.count { !it.ppvCategory }
+            placeholders = channels.count { it.ppvPlaceholder }
+        }
+    }
 
     /**
      * Events from all live channels: event programmes on now and starting within 24 h, plus every PPV/event channel that
      * has neither – no guide rows at all, or only placeholders ("No Event Scheduled"). Those are listed under
      * "PPV channels" with the channel name as their title ([eventTitle]) so they stay reachable.
      */
-    fun events(onNow: List<OnNowItem>, upcomingProgs: List<Prog>, allChans: List<Chan>, now: Long): Events {
-        val eventChans = allChans.filter { isEventChannel(it) }
-        val byTvg = HashMap<String, MutableList<Chan>>()
-        for (c in eventChans) { val k = c.tvgId?.trim()?.lowercase()?.ifEmpty { null } ?: continue; byTvg.getOrPut(k) { ArrayList(2) }.add(c) }
+    fun events(onNow: List<OnNowItem>, upcomingProgs: List<Prog>, allChans: List<Chan>, now: Long): Events =
+        events(onNow, upcomingProgs, EventIndex(allChans), now)
+
+    /** Same, with the event channels prepared once per playlist ([EventIndex]). */
+    fun events(onNow: List<OnNowItem>, upcomingProgs: List<Prog>, idx: EventIndex, now: Long): Events {
         val live = onNow.filter { it.cls == OnNowClass.EVENT }
-        val next = upcoming(upcomingProgs, byTvg, now).filter { it.cls == OnNowClass.EVENT }
+        val next = upcoming(upcomingProgs, idx.byTvg, now).filter { it.cls == OnNowClass.EVENT }
         val listed = HashSet<String>()
-        for (i in live + next) for (s in i.sources) listed.add(s.id)
-        val rest = eventChans.filter { it.id !in listed }.sortedWith(compareBy(NATURAL) { it.name })
-        return Events(live, next, rest)
+        for (i in live) for (s in i.sources) listed.add(s.id)
+        for (i in next) for (s in i.sources) listed.add(s.id)
+        val named = ArrayList<Chan>()
+        var hidden = 0
+        for (c in idx.channels) {
+            if (c.id in listed) continue
+            if (c.ppvPlaceholder) hidden++ else named.add(c)
+        }
+        return Events(live, next, named, hidden)
     }
 
     /** Title of a PPV channel without guide data: its name. */

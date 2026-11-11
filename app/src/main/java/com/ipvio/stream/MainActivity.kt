@@ -214,6 +214,8 @@ private fun AppContent() {
     KeepScreenOn("playlist", PlaylistStore.loading)
     // Genre-Erkennung im Hintergrund; startet bei jeder neuen Liste (Neuladen, Sprachfilter, Jugendschutz) sauber neu
     LaunchedEffect(all) { Classifier.restart(ctx, all) }
+    // OnAir: per-playlist channel flags for the "now" screens (debug builds also log the on-now timings)
+    LaunchedEffect(liveAll) { OnNow.prepare(ctx, liveAll) }
 
     fun start(item: Item, title: String, url: String, startMs: Long = 0L) {
         History.add(ctx, item.id)

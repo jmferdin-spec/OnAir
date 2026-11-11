@@ -46,7 +46,8 @@ private class DebugData(
     val guideChannels: Int, val live: Int, val liveWithTvg: Int, val liveWithGuide: Int,
     val storedAt: Long, val status: String, val snap: OnNow.Snapshot, val offsets: String?,
     val byClass: Map<OnNowClass, Int>, val bySport: Map<Sport, Int>,
-    val other: List<OnNowItem>, val sports: List<OnNowItem>, val otherSports: List<OnNowItem>
+    val other: List<OnNowItem>, val sports: List<OnNowItem>, val otherSports: List<OnNowItem>,
+    val ppv: OnNowLogic.EventIndex, val ppvSamples: List<OnNowLogic.Chan>, val indexMs: Long
 )
 
 /** Up to [n] items spread over the whole list (not just the first few), so the sample shows variety. */
@@ -73,7 +74,9 @@ private suspend fun computeDebug(c: Context, liveAll: List<Item>, force: Boolean
             byClass = OnNowLogic.countByClass(items), bySport = OnNowLogic.countBySport(items),
             other = spread(items.filter { it.cls == OnNowClass.OTHER }, 20),
             sports = spread(sports, 20),
-            otherSports = spread(sports.filter { it.sport == Sport.OTHER }, 20)
+            otherSports = spread(sports.filter { it.sport == Sport.OTHER }, 20),
+            ppv = OnNow.indexFor(liveAll).events, ppvSamples = spread(OnNow.indexFor(liveAll).events.channels, 20),
+            indexMs = OnNow.indexMs
         )
     }
 }
@@ -135,13 +138,31 @@ fun OnAirDebugScreen(liveAll: List<Item>, onBack: () -> Unit) {
         item { DebugLine("Live channels: ${d.live}   ·   with tvg-id: ${d.liveWithTvg}   ·   with guide rows: ${d.liveWithGuide}") }
 
         item { DebugHeader("On now (${hhmm(s.at)}) – ${s.items.size} cards after merging, computed in ${s.ms} ms (cached up to 60 s)") }
+        item { DebugLine("Stages: ${s.stages.ifEmpty { "–" }}", "Channel index (once per playlist): ${d.indexMs} ms") }
         item { DebugLine(OnNowClass.entries.joinToString("   ·   ") { "${it.name.lowercase().replaceFirstChar { c -> c.uppercase() }}: ${d.byClass[it] ?: 0}" }) }
 
         item { DebugHeader("Sports by group") }
         if (d.bySport.isEmpty()) item { DebugLine("No sports on now") }
         else item { DebugLine(d.bySport.entries.joinToString("   ·   ") { "${it.key.label}: ${it.value}" }) }
 
-        item { DebugHeader("Events – live ${s.events.live.size}   ·   coming up (24 h) ${s.events.upcoming.size}   ·   PPV channels with nothing listed ${s.events.channels.size}") }
+        item { DebugHeader("PPV / event channels – ${d.ppv.channels.size}   ·   ${d.ppv.placeholders} placeholder slots   ·   ${d.ppv.byNameOnly} by name only") }
+        item {
+            val cats = d.ppv.categories
+            DebugLine(
+                "PPV categories (${cats.size}): " + (if (cats.isEmpty()) "none" else cats.take(15).joinToString("   ·   ") { "${it.first} (${it.second})" }) +
+                    (if (cats.size > 15) "   ·   +${cats.size - 15} more" else ""),
+                "Matched by Xtream category name; by channel name only for clear PPV names (\"PPV 01\", \"PPV:\"), never \"Event\" alone"
+            )
+        }
+        items(d.ppvSamples, key = { "ps" + it.id }) { ch ->
+            DebugLine(
+                "[PPV] ${ch.name}" + (if (ch.ppvPlaceholder) "   ·   placeholder" else ""),
+                "Xtream: ${ch.group}" + (ch.catId?.let { " (#$it)" } ?: "") + "   ·   " + (if (ch.ppvCategory) "PPV category" else "PPV name") +
+                    "   ·   " + (if (ch.tvgId.isNullOrBlank()) "no tvg-id" else "tvg-id ${ch.tvgId}")
+            )
+        }
+
+        item { DebugHeader("Events – live ${s.events.live.size}   ·   coming up (24 h) ${s.events.upcoming.size}   ·   PPV channels with nothing listed ${s.events.channels.size} (+${s.events.hiddenPlaceholders} placeholder slots hidden)") }
         items(s.events.live.take(10), key = { "el" + it.prog.tvgId + it.prog.start + it.title }) { DebugItem(it, s.at) }
         items(s.events.upcoming.take(10), key = { "eu" + it.prog.tvgId + it.prog.start + it.title }) { DebugItem(it, s.at, upcoming = true) }
         items(s.events.channels.take(20), key = { "ec" + it.id }) { ch ->

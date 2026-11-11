@@ -147,6 +147,20 @@ object GuideDb {
     fun startingBetween(c: Context, fromSec: Long, toSec: Long): List<OnNowLogic.Prog> =
         query(c, "start >= ? AND start < ?", arrayOf(fromSec.toString(), toSec.toString()))
 
+    /**
+     * Same, only for the channels [tvgIds] (lower case) – uses the (tvg_id, start) index instead of reading every channel's
+     * next hours. Asked in chunks to stay below SQLite's limit on bound parameters.
+     */
+    fun startingBetween(c: Context, fromSec: Long, toSec: Long, tvgIds: Collection<String>): List<OnNowLogic.Prog> {
+        if (tvgIds.isEmpty()) return emptyList()
+        val out = ArrayList<OnNowLogic.Prog>()
+        for (chunk in tvgIds.chunked(400)) {
+            val marks = chunk.joinToString(",") { "?" }
+            out += query(c, "tvg_id IN ($marks) AND start >= ? AND start < ?", (chunk + listOf(fromSec.toString(), toSec.toString())).toTypedArray())
+        }
+        return out
+    }
+
     private fun query(c: Context, where: String, args: Array<String>): List<OnNowLogic.Prog> =
         db(c).rawQuery("SELECT tvg_id, title, start, stop, categories, episode, sub_title, descr FROM programme WHERE $where", args).use { cur ->
             val out = ArrayList<OnNowLogic.Prog>(cur.count)
