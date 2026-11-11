@@ -281,6 +281,21 @@ private fun AppContent() {
         start(item, item.title, item.url)
     }
 
+    /**
+     * OnAir v2 (Phase 8): Multiview from the player – the channel playing now continues (in Multiview's own player, in the
+     * picker's small window) and the picker opens for the second one. Accounts with 1 stream can't: say so instead.
+     */
+    fun startMultiview(id: String) {
+        val item = liveAll.firstOrNull { it.id == id } ?: return
+        val max = AccountStore.get(ctx, PlaylistStore.savedUrl(ctx))?.maxConnections
+        if (!MultiviewLogic.available(max)) {
+            android.widget.Toast.makeText(ctx, Lang.tr("Dein Konto erlaubt nur einen Stream – Multiview ist nicht möglich."), android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        playing = null
+        Multiview.begin(ctx, item)
+    }
+
     /** OnAir: a past programme of a catch-up channel picked in the standalone guide. */
     fun archiveFromGuide(ch: Item, e: EpgEntry) {
         val url = Catchup.urlFor(ch, e)
@@ -363,6 +378,10 @@ private fun AppContent() {
         val b = browse
         val c = cats
         when {
+            // OnAir v2 (Phase 8): Multiview (picker or screens) – above everything while it runs
+            Multiview.active -> Box(Modifier.fillMaxSize()) {
+                MultiviewHost(liveAll) { item -> if (item != null) start(item, item.title, item.url) }
+            }
             p != null -> {
                 val zap = if (p.live || p.archive != null) {
                     val ctxList = ZapContext.list
@@ -377,7 +396,7 @@ private fun AppContent() {
                 }
                 // Neuer Start von außen (z. B. Erinnerung „Umschalten“) während der Wiedergabe: Player neu aufbauen
                 key(p) {
-                    PlayerScreen(p, zap, liveAll, seriesItem) {
+                    PlayerScreen(p, zap, liveAll, seriesItem, onMultiview = if (p.live && p.archive == null) { id -> startMultiview(id) } else null) {
                         // Live: zurück in Live TV auf den zuletzt gesehenen Sender (auch nach Umschalten im Player)
                         if (p.live || p.archive != null) LastFocus.pending = History.ids.firstOrNull { id -> liveAll.any { it.id == id } }
                         playing = null
@@ -419,8 +438,9 @@ private fun AppContent() {
                 NowScreen(
                     OnAirNav.tile, liveAll,
                     onWatch = { ch, zap -> watchFromNow(ch, zap) },
-                    onGuide = { OnAirNav.openGuide(OnAirScreen.HOME) }
-                ) { OnAirNav.back() }
+                    onGuide = { OnAirNav.openGuide(OnAirScreen.HOME) },
+                    onBack = { OnAirNav.back() }
+                )
             } }
             OnAirNav.screen == OnAirScreen.HOME -> Box(Modifier.fillMaxSize().screenEnter()) {
                 OnAirHomeScreen(

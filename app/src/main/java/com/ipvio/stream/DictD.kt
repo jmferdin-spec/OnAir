@@ -135,4 +135,21 @@ Programm wurde {0} aktualisiert – nächste Aktualisierung ab {1}¦Guide was up
 Nächste Aktualisierung ab {0}¦Next update possible from {0}
 # OnAir v2: Phase 7 – Multiview
 Dein Konto erlaubt {#0} Streams; einer wird vielleicht auf einem anderen Gerät genutzt¦Your account allows {#0} streams; one may be in use on another device
+# OnAir v2: Phase 8 – Multiview screen and channel picker
+Sender für Multiview hinzufügen¦Add channel
+Sender wechseln¦Change channel
+Wähle einen Sender – der laufende spielt oben rechts weiter.¦Pick a channel – the one playing continues at the top right.
+Zurück = abbrechen¦Back = cancel
+Sender oder Sendung suchen¦Search channels or programmes
+Auswählen¦Choose
+Bild vergrößern¦Enlarge screen
+Bild verkleinern¦Reduce screen
+Vollbild¦Full screen
+Bild entfernen¦Remove screen
+Multiview beenden?¦Exit multiview?
+Das ausgewählte Bild läuft im Vollbild weiter.¦The selected screen continues full-screen.
+Beenden¦Exit
+Kann ruckeln: zwei 4K-Streams¦May stutter: two 4K streams
+Wiedergabe fehlgeschlagen ({0})¦Playback failed ({0})
+Dein Konto erlaubt nur einen Stream – Multiview ist nicht möglich.¦Your account allows only one stream – Multiview isn't possible.
 """

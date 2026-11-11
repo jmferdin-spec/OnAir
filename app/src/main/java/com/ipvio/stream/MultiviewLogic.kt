@@ -213,6 +213,39 @@ object MultiviewLogic {
         return lower.firstOrNull()?.let { Choice(it, false) } ?: Choice(wanted, true)
     }
 
+    // ------------------------------------------------------------------ channel picker search
+
+    /** One search result: the channel to add, what to show, and whether it came from a programme on now. */
+    data class Hit(val channelId: String, val label: String, val sub: String, val programme: Boolean)
+
+    /** A live channel as the search sees it. */
+    data class SearchChan(val id: String, val name: String, val group: String)
+
+    /**
+     * Picker search: programmes on now whose title contains every word of [query] (their best source), then channels whose
+     * name contains every word – accent- and case-insensitive ([OnNowLogic.norm]), at most [max] results, no channel twice.
+     * Fewer than 2 characters: nothing (avoids listing thousands of channels while typing the first letter).
+     */
+    fun search(query: String, channels: List<SearchChan>, onNow: List<OnNowItem>, max: Int = 60): List<Hit> {
+        val words = OnNowLogic.norm(query).split(' ').filter { it.isNotEmpty() }
+        if (words.joinToString("").length < 2) return emptyList()
+        fun hit(text: String): Boolean { val n = " " + OnNowLogic.norm(text) + " "; return words.all { n.contains(it) } }
+        val out = ArrayList<Hit>()
+        val seen = HashSet<String>()
+        for (i in onNow) {
+            if (out.size >= max) break
+            val src = i.sources.firstOrNull() ?: continue
+            if (!hit(i.title) || !seen.add(src.id)) continue
+            out.add(Hit(src.id, i.title, src.name, true))
+        }
+        for (c in channels) {
+            if (out.size >= max) break
+            if (!hit(c.name) || !seen.add(c.id)) continue
+            out.add(Hit(c.id, c.name, c.group, false))
+        }
+        return out
+    }
+
     // ------------------------------------------------------------------ stream limit message
 
     /** Shown when a further stream does not start while other screens play (owner's wording; German source in DictD). */

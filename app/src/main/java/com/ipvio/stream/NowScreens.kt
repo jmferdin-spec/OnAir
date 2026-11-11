@@ -87,7 +87,11 @@ fun NowScreen(
     liveAll: List<Item>,
     onWatch: (OnNowLogic.Chan, List<OnNowLogic.Chan>) -> Unit,
     onGuide: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    /** Multiview picker: room kept free on the right (the running stream's small window sits there). */
+    reserveEnd: androidx.compose.ui.unit.Dp = 0.dp,
+    /** Button in the detail panel ("Ansehen", in the Multiview picker "Auswählen"). */
+    watchLabel: String = "Ansehen"
 ) {
     val ctx = LocalContext.current
     var detail by remember { mutableStateOf<OnNowItem?>(null) }
@@ -107,7 +111,7 @@ fun NowScreen(
     }
 
     Box(Modifier.fillMaxSize().background(Bg)) {
-        Column(Modifier.fillMaxSize().padding(start = 40.dp, end = 40.dp, top = 28.dp)) {
+        Column(Modifier.fillMaxSize().padding(start = 40.dp, end = 40.dp + reserveEnd, top = 28.dp)) {
             NowHeader(tile, nowSec)
             Spacer(Modifier.height(14.dp))
             val s = snap
@@ -123,8 +127,9 @@ fun NowScreen(
         val d = detail
         val dc = detailChan
         val zap = remember(snap, tile) { snap?.let { zapList(tile, it) } ?: emptyList() }
-        if (d != null) DetailPanel(d, nowSec, onClose = { closePanel() }) { ch -> detail = null; onWatch(ch, zap.ifEmpty { d.sources }) }
-        else if (dc != null) ChannelPanel(dc, onClose = { closePanel() }) { detailChan = null; onWatch(dc, zap.ifEmpty { listOf(dc) }) }
+        val left = reserveEnd > 0.dp
+        if (d != null) DetailPanel(d, nowSec, watchLabel, left, onClose = { closePanel() }) { ch -> detail = null; onWatch(ch, zap.ifEmpty { d.sources }) }
+        else if (dc != null) ChannelPanel(dc, watchLabel, left, onClose = { closePanel() }) { detailChan = null; onWatch(dc, zap.ifEmpty { listOf(dc) }) }
     }
 }
 
@@ -515,8 +520,10 @@ private fun EmptyState(message: String, onGuide: () -> Unit) {
 // ====================================================================== detail panel
 
 @Composable
-private fun PanelFrame(onClose: () -> Unit, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Color(0xCC05070C)).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+private fun PanelFrame(onClose: () -> Unit, left: Boolean = false, content: @Composable () -> Unit) {
+    // left: in the Multiview picker, so the running stream's window at the top right never covers the panel
+    Box(Modifier.fillMaxSize().background(Color(0xCC05070C)).clickable(onClick = onClose).padding(start = if (left) 40.dp else 0.dp),
+        contentAlignment = if (left) Alignment.CenterStart else Alignment.Center) {
         Column(
             Modifier.widthIn(max = 760.dp).fillMaxWidth(0.8f).clip(RoundedCornerShape(DS.RadiusL)).background(Surf)
                 .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(DS.RadiusL)).padding(28.dp),
@@ -526,12 +533,12 @@ private fun PanelFrame(onClose: () -> Unit, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun DetailPanel(item: OnNowItem, now: Long, onClose: () -> Unit, onWatch: (OnNowLogic.Chan) -> Unit) {
+private fun DetailPanel(item: OnNowItem, now: Long, watchLabel: String, left: Boolean, onClose: () -> Unit, onWatch: (OnNowLogic.Chan) -> Unit) {
     val first = remember { FocusRequester() }
     LaunchedEffect(item) { focusSoon(first) }
     val p = item.prog
     val upcoming = p.start > now
-    PanelFrame(onClose) {
+    PanelFrame(onClose, left) {
         Text(NowScreenLogic.eventTitle(item), color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, raw = true, maxLines = 2, overflow = TextOverflow.Ellipsis)
         val sub = listOfNotNull(p.episode, p.subTitle).joinToString(" · ")
         if (sub.isNotEmpty()) Text(sub, color = Accent2, fontSize = 16.sp, raw = true, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -547,7 +554,7 @@ private fun DetailPanel(item: OnNowItem, now: Long, onClose: () -> Unit, onWatch
         if (item.sources.size == 1) {
             val c = item.sources.first()
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                PillButton("Ansehen", modifier = Modifier.focusRequester(first), light = true, icon = AIcon.Play) { onWatch(c) }
+                PillButton(watchLabel, modifier = Modifier.focusRequester(first), light = true, icon = AIcon.Play) { onWatch(c) }
                 Text(c.name, color = Muted, fontSize = 15.sp, raw = true, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         } else {
@@ -566,14 +573,14 @@ private fun DetailPanel(item: OnNowItem, now: Long, onClose: () -> Unit, onWatch
 }
 
 @Composable
-private fun ChannelPanel(c: OnNowLogic.Chan, onClose: () -> Unit, onWatch: () -> Unit) {
+private fun ChannelPanel(c: OnNowLogic.Chan, watchLabel: String, left: Boolean, onClose: () -> Unit, onWatch: () -> Unit) {
     val first = remember { FocusRequester() }
     LaunchedEffect(c) { focusSoon(first) }
-    PanelFrame(onClose) {
+    PanelFrame(onClose, left) {
         Text(OnNowLogic.eventTitle(c), color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, raw = true, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(c.group, color = Accent2, fontSize = 16.sp, raw = true)
         Text("Kein Programm im Guide", color = Muted, fontSize = 15.sp)
         Spacer(Modifier.height(6.dp))
-        PillButton("Ansehen", modifier = Modifier.focusRequester(first), light = true, icon = AIcon.Play) { onWatch() }
+        PillButton(watchLabel, modifier = Modifier.focusRequester(first), light = true, icon = AIcon.Play) { onWatch() }
     }
 }

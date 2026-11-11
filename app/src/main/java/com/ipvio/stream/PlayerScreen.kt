@@ -139,7 +139,12 @@ private fun findActivity(c: Context): ComponentActivity? =
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun PlayerScreen(req: PlayReq, zapList: List<Item>, liveAll: List<Item>, seriesItem: Item? = null, onBack: () -> Unit) {
+fun PlayerScreen(
+    req: PlayReq, zapList: List<Item>, liveAll: List<Item>, seriesItem: Item? = null,
+    /** OnAir v2: open Multiview with the channel playing now (live only); null = no Multiview entry. */
+    onMultiview: ((String) -> Unit)? = null,
+    onBack: () -> Unit
+) {
     val ctx = LocalContext.current
     CatFavs.init(ctx)
     // Eigene HTTP-Einstellungen: folgt Weiterleitungen auch von http nach https (viele IPTV-Server tun das)
@@ -1243,6 +1248,10 @@ fun PlayerScreen(req: PlayReq, zapList: List<Item>, liveAll: List<Item>, seriesI
                             PRoundButton(label = "TV-Guide", onLabel = setLabel, onClick = { controls = false; showGuide = true }) {
                                 PlayerIcon(PIcon.Guide, it)
                             }
+                            // OnAir v2: a second live channel next to this one
+                            if (onMultiview != null && cur.archive == null) PRoundButton(label = "Multiview", onLabel = setLabel, onClick = { onMultiview(cur.itemId) }) {
+                                AppIcon(AIcon.Grid, it, size = 26.dp)
+                            }
                             PRoundButton(label = "Zurück zu Live", onLabel = setLabel, onClick = {
                                 if (player.isCurrentMediaItemSeekable) player.seekToDefaultPosition()
                                 else { player.stop(); player.prepare() }
@@ -1561,6 +1570,7 @@ fun PlayerScreen(req: PlayReq, zapList: List<Item>, liveAll: List<Item>, seriesI
                         add(MenuEntry(11, "Technik-Info", if (techOn) "An" else "Aus", false))
                                         add(MenuEntry(8, "Sleep-Timer", if (sleepIdx == 0) "Aus" else SLEEP_MIN[sleepIdx].toString() + " min", true))
                         if (cur.live && lastChId != null) add(MenuEntry(9, "Letzter Kanal", null, false))
+                        if (cur.live && cur.archive == null && onMultiview != null) add(MenuEntry(14, "Multiview", null, true))
                         add(MenuEntry(7, "Extern öffnen", null, false))
                     }
                     val focusAt = menuSel.coerceIn(0, entries.lastIndex)
@@ -1583,6 +1593,7 @@ fun PlayerScreen(req: PlayReq, zapList: List<Item>, liveAll: List<Item>, seriesI
                                     11 -> techOn = !techOn
                                     13 -> AppSettings.setAutoOutro(ctx, !AppSettings.autoSkipOutro)
                                     9 -> { panel = Panel.NONE; panelParent = Panel.NONE; lastChannel() }
+                                    14 -> { panel = Panel.NONE; panelParent = Panel.NONE; onMultiview?.invoke(cur.itemId) }
                                     5 -> AppSettings.setPlayerExtra(ctx, !AppSettings.autoNext, AppSettings.hideSec, AppSettings.showEndTime, AppSettings.autoSkipIntro)
                                     6 -> AppSettings.setPlayerExtra(ctx, AppSettings.autoNext, AppSettings.hideSec, !AppSettings.showEndTime, AppSettings.autoSkipIntro)
                                     else -> {

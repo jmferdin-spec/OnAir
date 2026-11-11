@@ -128,4 +128,44 @@ class MultiviewLogicTest {
         assertNull(MultiviewLogic.startFailure(404, false, othersPlaying = 1, maxConnections = 2))     // channel gone: not a limit
         assertTrue(MultiviewLogic.available(2)); assertTrue(MultiviewLogic.available(null)); assertFalse(MultiviewLogic.available(1))
     }
+
+    // ------------------------------------------------------------------ Phase 8: picker search
+
+    private val chans = listOf(
+        MultiviewLogic.SearchChan("c1", "ESPN HD", "US| SPORTS"),
+        MultiviewLogic.SearchChan("c2", "TUDN Fútbol", "LATINO| DEPORTES"),
+        MultiviewLogic.SearchChan("c3", "Cinema One", "US| MOVIES"),
+        MultiviewLogic.SearchChan("c4", "ESPN 2", "US| SPORTS")
+    )
+    private fun now(title: String, chan: String) = OnNowItem(
+        OnNowClass.SPORTS, Sport.NFL, OnNowLogic.Prog("x.us", title, 0, 3600), listOf(OnNowLogic.Chan(chan, "Chan $chan", "US| SPORTS"))
+    )
+
+    @Test fun searchFindsProgrammesFirstThenChannels() {
+        val onNow = listOf(now("Eagles vs Cowboys", "c4"), now("Evening News", "c9"))
+        val hits = MultiviewLogic.search("espn", chans, onNow)
+        assertEquals(listOf("c1", "c4"), hits.map { it.channelId })
+        val game = MultiviewLogic.search("eagles", chans, onNow)
+        assertEquals(listOf(MultiviewLogic.Hit("c4", "Eagles vs Cowboys", "Chan c4", true)), game)
+        // a channel found by its programme is not listed again by name
+        // "es": the programme "Eagles …" on c4 first, then channel ESPN HD (c1); ESPN 2 is c4 – already listed, not again
+        assertEquals(listOf("c4", "c1"), MultiviewLogic.search("es", chans, onNow).map { it.channelId })
+    }
+
+    @Test fun searchIsAccentAndCaseInsensitiveAndNeedsTwoLetters() {
+        assertEquals(listOf("c2"), MultiviewLogic.search("FUTBOL", chans, emptyList()).map { it.channelId })
+        assertEquals(listOf("c2"), MultiviewLogic.search("tudn fút", chans, emptyList()).map { it.channelId })
+        assertTrue(MultiviewLogic.search("e", chans, emptyList()).isEmpty())          // one letter: nothing yet
+        assertTrue(MultiviewLogic.search("  ", chans, emptyList()).isEmpty())
+        assertEquals(1, MultiviewLogic.search("es", chans, emptyList(), max = 1).size)
+    }
+
+    @Test fun phase8TextsInEnglish() {
+        I18nCore.load(DictA, DictB, DictC, DictD, DictE, DictF, DictG, DictH, DictI)
+        assertEquals("Exit multiview?", I18nCore.translate("Multiview beenden?", 1))
+        assertEquals("Enlarge screen", I18nCore.translate("Bild vergrößern", 1))
+        assertEquals("Reduce screen", I18nCore.translate("Bild verkleinern", 1))
+        assertEquals("Playback failed (HTTP 502)", I18nCore.translate("Wiedergabe fehlgeschlagen (HTTP 502)", 1))
+        assertEquals("Add channel", I18nCore.translate("Sender für Multiview hinzufügen", 1))
+    }
 }
