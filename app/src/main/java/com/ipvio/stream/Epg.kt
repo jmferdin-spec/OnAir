@@ -170,7 +170,7 @@ object Xmltv {
     private fun download(c: Context, url: String, to: File, active: () -> Boolean) {
         LoginDebug.request(url)
         client.newCall(Request.Builder().url(url).build()).execute().use { r ->
-            if (BuildConfig.DEBUG) LoginDebug.response(url, r.code, r.message, runCatching { r.peekBody(1024).string() }.getOrDefault("<unreadable>"))
+            LoginDebug.response(url, r.code, r.message) { runCatching { r.peekBody(1024).string() }.getOrDefault("<unreadable>") }
             if (!r.isSuccessful) throw PlaylistError("HTTP ${r.code}")
             val body = r.body ?: throw PlaylistError("leer")
             val len = body.contentLength()

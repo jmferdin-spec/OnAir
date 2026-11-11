@@ -476,7 +476,7 @@ object PlaylistStore {
         try {
             cl.execute().use { r ->
                 val body = r.body?.string().orEmpty()
-                LoginDebug.response(u, r.code, r.message, body)
+                LoginDebug.response(u, r.code, r.message) { body }
                 return r.code to body
             }
         } finally {
@@ -528,7 +528,7 @@ object PlaylistStore {
                 call = cl
                 try {
                     cl.execute().use { r ->
-                        LoginDebug.response(lu, r.code, r.message, runCatching { r.peekBody(2048).string() }.getOrDefault("<unreadable>"))
+                        LoginDebug.response(lu, r.code, r.message) { runCatching { r.peekBody(2048).string() }.getOrDefault("<unreadable>") }
                         if (!r.isSuccessful) throw PlaylistError(PlaylistLogic.httpError(r.code))
                         val rb = r.body ?: throw PlaylistError("Der Server hat keine Daten geliefert.")
                         val base = bytesRead
@@ -574,7 +574,7 @@ object PlaylistStore {
         try {
             LoginDebug.request(u)
             cl.execute().use { r ->
-                if (BuildConfig.DEBUG) LoginDebug.response(u, r.code, r.message, runCatching { r.peekBody(2048).string() }.getOrDefault("<unreadable>"))
+                LoginDebug.response(u, r.code, r.message) { runCatching { r.peekBody(2048).string() }.getOrDefault("<unreadable>") }
                 var append = false
                 when (LoadLogic.resumeAction(r.code, r.header("Content-Range"), offset)) {
                     LoadLogic.APPEND -> append = true

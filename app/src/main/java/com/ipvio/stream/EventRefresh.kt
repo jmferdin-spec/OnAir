@@ -72,7 +72,7 @@ object EventRefresh {
                     val u = XtreamApiLogic.apiUrl(acct, "get_live_streams", "&category_id=$cat")
                     LoginDebug.request(u)
                     client.newCall(Request.Builder().url(u).header("User-Agent", PlaylistStore.UA).build()).execute().use { r ->
-                        LoginDebug.response(u, r.code, r.message, runCatching { r.peekBody(1024).string() }.getOrDefault(""))
+                        LoginDebug.response(u, r.code, r.message) { runCatching { r.peekBody(1024).string() }.getOrDefault("") }
                         if (!r.isSuccessful) throw PlaylistError(PlaylistLogic.httpError(r.code))
                         val body = r.body ?: throw PlaylistError("Der Server hat keine Daten geliefert.")
                         XtreamApi.forEachObject(body.charStream(), {}) { f ->

@@ -63,7 +63,7 @@ object SeriesInfo {
                     LoginDebug.request(url)
                     client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                         val body = resp.body?.string().orEmpty()
-                        LoginDebug.response(url, resp.code, resp.message, body)
+                        LoginDebug.response(url, resp.code, resp.message) { body }
                         if (resp.isSuccessful) XtreamApiLogic.episodesOf(body) else emptyList()
                     }
                 } catch (e: Exception) {
