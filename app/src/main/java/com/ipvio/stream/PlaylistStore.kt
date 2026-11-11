@@ -502,8 +502,9 @@ object PlaylistStore {
         bytesRead = 0L; totalBytes = -1L; downloadDone = false
         val (code, body) = apiText(XtreamApiLogic.apiUrl(a))
         if (code !in 200..299) throw PlaylistError(PlaylistLogic.httpError(code))
-        val acc = XtreamApiLogic.account(body)
+        val acc = XtreamApiLogic.account(body, System.currentTimeMillis())
         if (!acc.ok) throw PlaylistError(PlaylistLogic.httpError(401))
+        acc.info?.let { AccountStore.put(c, u, it) }   // OnAir v2: max connections etc. for Multiview / debug screen
         val liveExt = XtreamApiLogic.liveExt(acc.formats)
         info.writeText(LoadLogic.PartInfo(key(u), null, null, "UTF-8").encode())
         phase = "Playlist wird heruntergeladen …"

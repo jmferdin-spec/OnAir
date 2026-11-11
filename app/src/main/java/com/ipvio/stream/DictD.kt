@@ -133,4 +133,6 @@ Der Anbieter bittet zu warten – neuer Versuch ab {0}¦The provider asked us to
 Der letzte Versuch ist fehlgeschlagen – neuer Versuch ab {0}¦The last attempt failed – next try from {0}
 Programm wurde {0} aktualisiert – nächste Aktualisierung ab {1}¦Guide was updated at {0} – next update possible from {1}
 Nächste Aktualisierung ab {0}¦Next update possible from {0}
+# OnAir v2: Phase 7 – Multiview
+Dein Konto erlaubt {#0} Streams; einer wird vielleicht auf einem anderen Gerät genutzt¦Your account allows {#0} streams; one may be in use on another device
 """

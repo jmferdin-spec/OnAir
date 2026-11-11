@@ -197,4 +197,24 @@ class XtreamApiLogicTest {
         assertTrue(XtreamApiLogic.refsOf(null).isEmpty())
         assertTrue(XtreamApiLogic.refsOf("sn.us").isEmpty())
     }
+
+    // ------------------------------------------------------------------ OnAir v2: account limits (user_info)
+
+    @Test fun accountInfoFromTheAccountCheck() {
+        val json = """{"user_info":{"username":"demo","password":"x","auth":1,"status":"Active","exp_date":"1830000000",
+            "is_trial":"0","active_cons":"1","max_connections":"2","allowed_output_formats":["ts"]},"server_info":{}}"""
+        val acc = XtreamApiLogic.account(json, checkedAt = 1_800_000_000_000L)
+        val i = acc.info!!
+        assertEquals(2, i.maxConnections); assertEquals(1, i.activeCons); assertEquals(1_830_000_000L, i.expDate)
+        assertEquals("Active", i.status); assertFalse(i.trial); assertEquals(1_800_000_000_000L, i.checkedAt)
+        // stored form round-trips and never contains the credentials
+        val enc = i.encode()
+        assertFalse(enc.contains("demo")); assertFalse(enc.contains("password"))
+        assertEquals(i, XtreamApiLogic.AccountInfo.decode(enc))
+        // missing / odd values
+        val odd = XtreamApiLogic.account("""{"user_info":{"auth":1,"max_connections":null,"exp_date":null,"is_trial":"1"}}""").info!!
+        assertNull(odd.maxConnections); assertNull(odd.expDate); assertTrue(odd.trial)
+        assertNull(XtreamApiLogic.AccountInfo.decode("garbage"))
+        assertNull(XtreamApiLogic.account("[]").info)
+    }
 }

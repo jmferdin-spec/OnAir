@@ -47,7 +47,8 @@ private class DebugData(
     val storedAt: Long, val status: String, val snap: OnNow.Snapshot, val offsets: String?,
     val byClass: Map<OnNowClass, Int>, val bySport: Map<Sport, Int>,
     val other: List<OnNowItem>, val sports: List<OnNowItem>, val otherSports: List<OnNowItem>,
-    val ppv: OnNowLogic.EventIndex, val ppvSamples: List<OnNowLogic.Chan>, val indexMs: Long
+    val ppv: OnNowLogic.EventIndex, val ppvSamples: List<OnNowLogic.Chan>, val indexMs: Long,
+    val account: XtreamApiLogic.AccountInfo?, val decoders: List<DecoderCaps.Dec>
 )
 
 /** Up to [n] items spread over the whole list (not just the first few), so the sample shows variety. */
@@ -76,7 +77,9 @@ private suspend fun computeDebug(c: Context, liveAll: List<Item>, force: Boolean
             sports = spread(sports, 20),
             otherSports = spread(sports.filter { it.sport == Sport.OTHER }, 20),
             ppv = OnNow.indexFor(liveAll).events, ppvSamples = spread(OnNow.indexFor(liveAll).events.channels, 20),
-            indexMs = OnNow.indexMs
+            indexMs = OnNow.indexMs,
+            account = AccountStore.get(c, PlaylistStore.savedUrl(c)),
+            decoders = DecoderCaps.read()
         )
     }
 }
@@ -118,6 +121,32 @@ fun OnAirDebugScreen(liveAll: List<Item>, onBack: () -> Unit) {
             return@LazyColumn
         }
         val s = d.snap
+        // OnAir v2 (Phase 7): account limits, decoders, two-stream test
+        item { DebugHeader("Account (from the last catalog download – no extra request)") }
+        item {
+            val a = d.account
+            if (a == null) DebugLine("Not stored yet", "Saved with the next catalog download (schedule or a manual reload)")
+            else DebugLine(
+                "Max connections: ${a.maxConnections ?: "?"}   ·   active at check: ${a.activeCons ?: "?"}   ·   status: ${a.status ?: "?"}" + (if (a.trial) "   ·   trial" else ""),
+                "Expires: " + (a.expDate?.let { dayLabel(it) + " " + hhmm(it) } ?: "–") + "   ·   checked: " + stamp(a.checkedAt) +
+                    "   ·   Multiview " + (if (MultiviewLogic.available(a.maxConnections)) "possible" else "not possible (1 stream)")
+            )
+        }
+        item { DebugHeader("Video decoders (hardware) – budget per codec in 1080p streams") }
+        val budget = DecoderCaps.budget(d.decoders)
+        if (d.decoders.isEmpty()) item { DebugLine("None found") }
+        items(d.decoders, key = { "dec" + it.name + it.mime }) { x ->
+            fun f(v: Double?) = v?.let { String.format(java.util.Locale.ROOT, "%.0f", it) } ?: "–"
+            val b = budget[x.mime]
+            DebugLine(
+                "${DecoderCaps.short(x.mime)}   ·   ${x.name}   ·   up to ${x.maxInstances} instances, ${x.maxW}×${x.maxH}",
+                "1080p: ${f(x.supported1080)} fps allowed, ${f(x.measured1080)} measured   ·   4K: ${f(x.supported2160)} allowed, ${f(x.measured2160)} measured" +
+                    (b?.let { "   ·   budget ≈ ${String.format(java.util.Locale.ROOT, "%.1f", it / (8160.0 * 50))} × 1080p50" } ?: "")
+            )
+        }
+        item { DebugHeader("Two-stream test") }
+        item { TwoStreamTestPanel(liveAll, d.account?.maxConnections) }
+
         item { DebugHeader("Guide database") }
         item { DebugLine("Imported: ${stamp(d.importedAt)}   ·   programmes: ${d.rows}   ·   channels with guide data: ${d.guideChannels}") }
         item {

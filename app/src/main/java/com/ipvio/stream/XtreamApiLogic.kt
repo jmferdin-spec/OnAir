@@ -87,16 +87,50 @@ object XtreamApiLogic {
         return out
     }
 
-    /** Account check: null = OK, else the HTTP-style code to report (401 = rejected). Also returns the allowed formats. */
-    class Account(val ok: Boolean, val formats: List<String>, val status: String?)
+    /**
+     * Account check: [ok] = login accepted, [formats] = allowed live formats, [info] = the account's limits for the debug
+     * screen and Multiview (no credentials).
+     */
+    class Account(val ok: Boolean, val formats: List<String>, val status: String?, val info: AccountInfo? = null)
 
-    fun account(json: String): Account {
+    /**
+     * OnAir v2: what the provider says about the account (player_api.php user_info) – stored without credentials.
+     * [maxConnections] = streams allowed at once (Multiview needs 2), [activeCons] = streams open at the moment of the
+     * check, [expDate] = Unix seconds (null = no expiry given), [checkedAt] = Unix ms of the check.
+     */
+    data class AccountInfo(
+        val maxConnections: Int?, val activeCons: Int?, val expDate: Long?, val status: String?, val trial: Boolean,
+        val checkedAt: Long
+    ) {
+        fun encode(): String = listOf(maxConnections ?: "", activeCons ?: "", expDate ?: "", (status ?: "").replace(";", ","), if (trial) "1" else "0", checkedAt).joinToString(";")
+
+        companion object {
+            fun decode(s: String?): AccountInfo? {
+                val p = s?.split(';') ?: return null
+                if (p.size != 6) return null
+                return AccountInfo(p[0].toIntOrNull(), p[1].toIntOrNull(), p[2].toLongOrNull(), p[3].ifBlank { null }, p[4] == "1", p[5].toLongOrNull() ?: return null)
+            }
+        }
+    }
+
+    private fun num(v: Any?): String? = v?.toString()?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", true) }
+
+    fun account(json: String, checkedAt: Long = 0L): Account {
         val o = try { JSONObject(json.trim()) } catch (e: Exception) { return Account(false, emptyList(), null) }
         val ui = o.optJSONObject("user_info") ?: return Account(false, emptyList(), null)
         val auth = ui.opt("auth")?.toString()?.trim()
         val f = ui.optJSONArray("allowed_output_formats")
         val formats = if (f == null) emptyList() else (0 until f.length()).map { f.optString(it) }
-        return Account(auth == "1" || auth == "true", formats, ui.optString("status").ifBlank { null })
+        val status = ui.optString("status").ifBlank { null }
+        val info = AccountInfo(
+            maxConnections = num(ui.opt("max_connections"))?.toIntOrNull(),
+            activeCons = num(ui.opt("active_cons"))?.toIntOrNull(),
+            expDate = num(ui.opt("exp_date"))?.toLongOrNull()?.takeIf { it > 0 },
+            status = status,
+            trial = num(ui.opt("is_trial")) == "1",
+            checkedAt = checkedAt
+        )
+        return Account(auth == "1" || auth == "true", formats, status, info)
     }
 
     private fun clean(s: String?): String? = s?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", true) }

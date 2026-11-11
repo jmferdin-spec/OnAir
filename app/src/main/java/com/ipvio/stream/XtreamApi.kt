@@ -78,3 +78,22 @@ object SeriesInfo {
         }
     }
 }
+
+/**
+ * OnAir v2: the account limits from the account check the catalog download already makes (player_api.php without action)
+ * – stored per playlist, keyed by a hash of the address (it contains the password), never the credentials themselves.
+ * No extra request: a new value arrives with the next catalog download.
+ */
+object AccountStore {
+    private const val PREFS = "onair_account"
+    private fun key(playlistUrl: String) = "acc_" + playlistUrl.trim().hashCode()
+
+    fun put(c: android.content.Context, playlistUrl: String, info: XtreamApiLogic.AccountInfo) {
+        c.applicationContext.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit().putString(key(playlistUrl), info.encode()).apply()
+    }
+
+    fun get(c: android.content.Context, playlistUrl: String?): XtreamApiLogic.AccountInfo? {
+        val u = playlistUrl ?: return null
+        return XtreamApiLogic.AccountInfo.decode(c.applicationContext.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).getString(key(u), null))
+    }
+}
