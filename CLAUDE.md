@@ -204,6 +204,61 @@ Since v1.0 the TV runs the **release** build. Debug and release are signed with 
 adb -s <onn-4k-plus-ip>:5555 install -r app/build/outputs/apk/release/app-release.apk
 ```
 
+## v2 — plan (2026-11-11)
+
+Two features: a **force guide update** button and **Multiview** (two live channels at once, like TiviMate). Same ground rules as v1: small verifiable phases, pure logic in `*Logic.kt` with tests, every provider call through `ProviderGuard` / `RefreshLogic`, release build verified on the TV before tagging.
+
+### Findings before designing (2026-11-11)
+
+- **Account connections: `max_connections` = 2** (owner, from the browser, 2026-11-11). Each multiview screen is one stream = one provider connection, so with 2 screens open **both connections are in use**. If a second stream fails to start (connection refused / limit), show: **"Your account allows 2 streams; one may be in use on another device"** – never a generic error. The account check (`player_api.php` without action) is not stored today; Phase 7 stores `user_info` (`max_connections`, `active_cons`, `exp_date`, `status`) from the check the catalog download already makes (no extra request) and shows it on the debug screen.
+- **Decoders (onn 4K Plus, Amlogic S905X5M, `/vendor/etc/media_codecs_amlogic_video.xml`):** hardware decoders `c2.amlogic.{avc,hevc,vp9,av1}.decoder`, up to 9 instances each, max 4096×4096 (AV1 3840×3840). The real limit is throughput: AVC 1,036,800 blocks/s (≈ one 4K30 or two 1080p60), HEVC 2,073,600 blocks/s (≈ one 4K60 or two 4K30). Measured single-instance rates: AVC 1080p ≈ 134 fps, HEVC 1080p ≈ 220–247 fps, HEVC 4K ≈ 87–103 fps.
+  - Two 1080p streams fit (AVC 2 × 50–60 fps = 100–120 of ~134 fps – tight but within budget; 2 × 1080p30 easily).
+  - **Two 4K streams do not fit reliably** (AVC 4K never twice; HEVC 4K only at ≤ 30 fps each, and many 4K channels are 50/60 fps). Rule for v2: at most one screen ≥ 4K; any other screen uses a ≤ 1080p source (same programme / tvg-id, lower quality) – automatically.
+  - Secure (DRM) decoders: max 2 and `supports-multiple-secure-codecs=false` – irrelevant for IPTV.
+- **Video output:** the display pipeline has two hardware video composer paths (`/sys/class/video_composer/video_composer.0` and `.1`, with dedicated "pip" counters). Two screens can each use their own path. A 3rd/4th screen (2×2) would have to be composed into a shared path – unmeasured; also 4 × 1080p50 exceeds the AVC budget, so 2×2 would need ≤ 720p or ≤ 30 fps sources. v2 ships with 2; the model allows N.
+- **Player today:** one ExoPlayer (`PlayerScreen.kt`) with `PlayerView`, FFmpeg software audio (`SoftAudio`), buffers from `Mem.loadControl` (this box: tier 1 = 20–40 s, 28 MB). A second player gets the small tier-0 buffer (14 MB) and no audio renderer while not selected (no second software audio decode).
+
+### Owner's answers (2026-11-11)
+
+1. While picking a channel the running stream keeps playing in a **small window at the top right** (like the guide's picture slot).
+2. Picker search finds **channel names and titles on now**.
+3. Multiview is **live channels only** (no On Demand).
+4. **Resume after Pause jumps back to live.**
+5. Enlarged layout: **large ≈ 75 % width at the top, small screen(s) in a row along the bottom.**
+6. A 4K channel with no ≤ 1080p sibling: **try it anyway with a "may stutter" note.**
+7. (Not answered – recommendation used:) a successful manual guide update also resets the 12-hour schedule.
+
+### Phase 6 — Force guide update (home screen)
+
+- A pill button on the home screen ("Update guide") with a status line next to it: "Guide updated 14:05" (last successful download + import), while running "Downloading guide …" / "Importing guide …", on failure the error.
+- Re-downloads **only** `xmltv.php` (all guide sources of the active playlist) and re-imports into SQLite – never the catalog (`player_api.php` / `get.php`).
+- New trigger in `RefreshLogic` (tested): manual guide update allowed at most every **15 min** after the last attempt, plus the existing failure backoff and provider cooldown. Pressed too soon: the line says why and when it is possible again ("Guide was updated at 14:05 – next manual update from 14:20").
+- A successful manual update counts as a guide success for the 12-hour schedule.
+
+### Phase 7 — Multiview groundwork (no new screens)
+
+- Store `user_info` from the account check; debug screen shows max/active connections and expiry. If `max_connections` is 1, the Multiview option explains it instead of opening.
+- Runtime decoder probe (`MediaCodecList`: per-codec max instances, blocks/s, performance points) + a debug-screen **dual-decode test**: plays two chosen channels at once for 30 s and reports dropped frames / decoder used / resolution per player – measured on the 4K Plus before building the UI.
+- `MultiviewLogic.kt` (pure, tested): screen model for N screens (v2: max 2), layouts (SPLIT 50/50; ENLARGED: one large + small row along the bottom), selection moves (Left/Right in SPLIT, Up/Down in ENLARGED), per-screen menu (Change channel, Pause/Resume, Enlarge/Reduce, Full screen, Remove), Back → confirm, what "Remove" / "Full screen" leave behind, and the quality budget (choose a ≤ 1080p sibling source when another screen is ≥ 4K; fall back to the same source with a warning if none exists).
+
+### Phase 8 — Multiview screen
+
+- Entry: in the player, OK → the existing options plus **Multiview**. Choosing it opens the channel picker (Phase 9); the picked channel opens next to the current one, 50/50.
+- Each screen its own ExoPlayer + surface; the selected screen has a visible highlight and the audio; the other is muted with its audio renderer disabled.
+- OK on a screen → menu: Change channel · Pause · Enlarge screen / Reduce screen · Full screen · Remove screen. Full screen: that channel continues in the normal player, the other stream stops. Remove: that stream stops, the remaining one goes full-screen.
+- Back: "Exit multiview?" – Yes: the selected screen continues full-screen; No: stay.
+- Error / provider limit (e.g. HTTP 4xx because of connections) on one screen: shown on that screen only; the other keeps playing.
+
+### Phase 9 — Channel picker ("Add channel" / "Change channel")
+
+- The normal home screen and its Live TV / Movies / Shows / Sports / Events screens and search, in a picker mode: choosing a card or channel returns it to Multiview instead of starting the player. The running stream keeps playing while picking (see questions).
+- Change channel uses the same picker and replaces only that screen.
+- Quality rule from Phase 7 applied when the channel is added.
+
+### Phase 10 — Tuning and release
+
+- Owner tests on the TV; fix navigation, layout, audio switching, quality fallback. Release build (signed), verified on the TV, README/CLAUDE.md updated, tag `v2.0`.
+
 ## Definition of done (v1)
 
 - OnAir name, icon and banner on the Google TV home screen
