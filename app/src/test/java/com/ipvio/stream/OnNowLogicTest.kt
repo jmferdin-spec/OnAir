@@ -278,7 +278,7 @@ class OnNowLogicTest {
         assertEquals(Sport.GOLF, sport("LIV Golf: Round 2"))
         assertEquals(Sport.OTHER, sport("Super Final LIV Highlights"))
         // word boundaries: WNBA is not NBA (stays Other Sports until tuned)
-        assertEquals(Sport.OTHER, sport("WNBA: Storm vs Sky"))
+        assertEquals(Sport.NBA, sport("WNBA: Storm vs Sky"))          // no WNBA group: basketball under NBA
     }
 
     @Test fun sportGroupFallsBackToCategoriesThenChannelThenGroup() {
@@ -470,5 +470,60 @@ class OnNowLogicTest {
             for (k in l) assertTrue(k, OnNowLogic.norm(k).isNotEmpty())
         }
         assertEquals(Sport.entries.size - 1, OnNowLogic.SPORT_RULES.map { it.sport }.toSet().size)   // every group except OTHER has a rule
+    }
+
+    // ------------------------------------------------------------------ team names (reported: Warriors at Rockets on ESPN)
+
+    @Test fun reportedNbaGameOnEspnIsNba() {
+        val title = "golden state warriors at Houston rockets"
+        // ESPN in a sports category: was Sports / Other Sports
+        assertEquals(OnNowClass.SPORTS, cls(title, "US| SPORTS", name = "ESPN"))
+        assertEquals(Sport.NBA, OnNowLogic.sportOf(prog(title), chan("ESPN", "US| SPORTS")))
+        // ESPN in another category (e.g. "USA", "US| ESPN"): was a Show – now Sports / NBA
+        for (g in listOf("USA", "US| ESPN", "US| ENTERTAINMENT")) {
+            assertEquals(g, OnNowClass.SPORTS, cls(title, g, name = "US: ESPN HD"))
+            assertEquals(g, Sport.NBA, OnNowLogic.sportOf(prog(title), chan("US: ESPN HD", g)))
+        }
+    }
+
+    @Test fun nbaAndWnbaTeamNames() {
+        for (t in listOf("Golden State Warriors at Houston Rockets", "Warriors at Rockets", "Warriors vs. Rockets", "Rockets @ Warriors",
+            "Houston Rockets at Golden State", "LA Lakers vs Boston Celtics", "Sixers at Knicks", "Thunder vs Spurs",
+            "NBA Basketball: Heat at Magic", "Las Vegas Aces at New York Liberty", "Fever vs Sky"))
+            assertEquals(t, Sport.NBA, OnNowLogic.teamSport(t))
+    }
+
+    @Test fun nflMlbNhlTeamNames() {
+        for ((t, s) in listOf(
+            "Dallas Cowboys at Philadelphia Eagles" to Sport.NFL, "Chiefs vs Bills" to Sport.NFL, "49ers @ Seahawks" to Sport.NFL,
+            "Giants vs Cowboys" to Sport.NFL,                      // Giants: NFL or MLB – the Cowboys decide
+            "New York Yankees at Boston Red Sox" to Sport.MLB, "Dodgers vs Padres" to Sport.MLB, "Cardinals at Cubs" to Sport.MLB,
+            "Giants at Dodgers" to Sport.MLB,
+            "Toronto Maple Leafs at Montréal Canadiens" to Sport.NHL, "Oilers vs Flames" to Sport.NHL,
+            "Kings at Rangers" to Sport.NHL,                       // Kings NBA/NHL, Rangers MLB/NHL → NHL
+            "Panthers vs Lightning" to Sport.NHL, "Jets at Canucks" to Sport.NHL
+        )) assertEquals(t, s, OnNowLogic.teamSport(t))
+        // on a sports channel the sport group follows
+        assertEquals(Sport.NFL, sport("Cowboys at Eagles"))
+        assertEquals(Sport.MLB, sport("Yankees vs Red Sox"))
+        assertEquals(Sport.NHL, sport("Maple Leafs at Canadiens"))
+    }
+
+    @Test fun teamNamesNeedAGameAndTwoSides() {
+        // a show that just mentions a team
+        assertNull(OnNowLogic.teamSport("Inside the Warriors"))
+        assertNull(OnNowLogic.teamSport("Warriors: The Season"))
+        assertEquals(OnNowClass.SHOW, cls("Inside the Warriors", "US| ENTERTAINMENT"))
+        // a game-like title with only one team side, or films
+        assertNull(OnNowLogic.teamSport("Wild at Heart"))
+        assertNull(OnNowLogic.teamSport("Thunder at Dawn"))
+        assertNull(OnNowLogic.teamSport("Sky Sports News at 10"))
+        // college games: cities only, no team names → not a pro league
+        assertNull(OnNowLogic.teamSport("Texas at Houston"))
+        assertNull(OnNowLogic.teamSport("Houston Cougars at UCF"))
+        // ambiguous both ways: Giants (NFL/MLB) vs Cardinals (NFL/MLB)
+        assertNull(OnNowLogic.teamSport("Giants vs Cardinals"))
+        // explicit league keyword in the title still wins
+        assertEquals(Sport.NHL, sport("NHL: Kings at Rangers"))
     }
 }

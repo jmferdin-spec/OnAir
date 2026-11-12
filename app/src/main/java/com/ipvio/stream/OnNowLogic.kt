@@ -244,7 +244,7 @@ object OnNowLogic {
         // "Football" alone: soccer on UK / international channels, American football (NFL) on US channels
         SportRule(Sport.NFL, listOf("FOOTBALL"), resolve = { if (isIntlFootballChannel(it.chan)) Sport.SOCCER else Sport.NFL }),
         SportRule(Sport.COLLEGE_BASKETBALL, listOf("NCAAB", "COLLEGE BASKETBALL", "NCAAM", "NCAAW", "MARCH MADNESS")),
-        SportRule(Sport.NBA, listOf("NBA")),
+        SportRule(Sport.NBA, listOf("NBA", "WNBA")),   // no WNBA group: WNBA games are basketball under NBA
         SportRule(Sport.MLB, listOf("MLB", "BASEBALL", "BEISBOL")),
         SportRule(Sport.NHL, listOf("NHL", "HOCKEY")),
         SportRule(Sport.SOCCER, listOf(
@@ -269,6 +269,108 @@ object OnNowLogic {
             "IMSA", "WRC", "LE MANS", "DAYTONA 500", "SUPERCARS", "MOTORSPORT", "MOTORSPORTS"
         ))
     )
+
+    // ================================================================== team names (data – tune here)
+
+    /**
+     * Pro teams per league as "City|Nickname|alias,alias". A team only counts in a game title ("A vs B", "A at B",
+     * "A @ B"), and both sides must name a team or a team city, at least one side by its team name – so a show that just
+     * mentions a team, or a college game like "Texas at Houston", is not taken for a pro game ([teamSport]).
+     * WNBA teams count as NBA (basketball; there is no WNBA group).
+     */
+    val TEAMS: Map<Sport, List<String>> = mapOf(
+        Sport.NBA to listOf(
+            "Atlanta|Hawks", "Boston|Celtics", "Brooklyn|Nets", "Charlotte|Hornets", "Chicago|Bulls", "Cleveland|Cavaliers|Cavs",
+            "Dallas|Mavericks|Mavs", "Denver|Nuggets", "Detroit|Pistons", "Golden State|Warriors", "Houston|Rockets",
+            "Indiana|Pacers", "Los Angeles|Clippers", "Los Angeles|Lakers", "Memphis|Grizzlies", "Miami|Heat", "Milwaukee|Bucks",
+            "Minnesota|Timberwolves|Wolves", "New Orleans|Pelicans", "New York|Knicks", "Oklahoma City|Thunder", "Orlando|Magic",
+            "Philadelphia|76ers|Sixers", "Phoenix|Suns", "Portland|Trail Blazers|Blazers", "Sacramento|Kings",
+            "San Antonio|Spurs", "Toronto|Raptors", "Utah|Jazz", "Washington|Wizards",
+            // WNBA
+            "Atlanta|Dream", "Chicago|Sky", "Connecticut|Sun", "Dallas|Wings", "Golden State|Valkyries", "Indiana|Fever",
+            "Las Vegas|Aces", "Los Angeles|Sparks", "Minnesota|Lynx", "New York|Liberty", "Phoenix|Mercury", "Seattle|Storm",
+            "Washington|Mystics", "Toronto|Tempo", "Portland|Fire"
+        ),
+        Sport.NFL to listOf(
+            "Arizona|Cardinals", "Atlanta|Falcons", "Baltimore|Ravens", "Buffalo|Bills", "Carolina|Panthers", "Chicago|Bears",
+            "Cincinnati|Bengals", "Cleveland|Browns", "Dallas|Cowboys", "Denver|Broncos", "Detroit|Lions", "Green Bay|Packers",
+            "Houston|Texans", "Indianapolis|Colts", "Jacksonville|Jaguars|Jags", "Kansas City|Chiefs", "Las Vegas|Raiders",
+            "Los Angeles|Chargers", "Los Angeles|Rams", "Miami|Dolphins", "Minnesota|Vikings", "New England|Patriots|Pats",
+            "New Orleans|Saints", "New York|Giants", "New York|Jets", "Philadelphia|Eagles", "Pittsburgh|Steelers",
+            "San Francisco|49ers|Niners", "Seattle|Seahawks", "Tampa Bay|Buccaneers|Bucs", "Tennessee|Titans",
+            "Washington|Commanders"
+        ),
+        Sport.MLB to listOf(
+            "Arizona|Diamondbacks|D-backs,Dbacks", "Atlanta|Braves", "Baltimore|Orioles", "Boston|Red Sox", "Chicago|Cubs",
+            "Chicago|White Sox", "Cincinnati|Reds", "Cleveland|Guardians", "Colorado|Rockies", "Detroit|Tigers",
+            "Houston|Astros", "Kansas City|Royals", "Los Angeles|Angels", "Los Angeles|Dodgers", "Miami|Marlins",
+            "Milwaukee|Brewers", "Minnesota|Twins", "New York|Mets", "New York|Yankees", "|Athletics", "Philadelphia|Phillies",
+            "Pittsburgh|Pirates", "San Diego|Padres", "San Francisco|Giants", "Seattle|Mariners", "St Louis|Cardinals",
+            "Tampa Bay|Rays", "Texas|Rangers", "Toronto|Blue Jays", "Washington|Nationals|Nats"
+        ),
+        Sport.NHL to listOf(
+            "Anaheim|Ducks", "Boston|Bruins", "Buffalo|Sabres", "Calgary|Flames", "Carolina|Hurricanes|Canes", "Chicago|Blackhawks",
+            "Colorado|Avalanche|Avs", "Columbus|Blue Jackets", "Dallas|Stars", "Detroit|Red Wings", "Edmonton|Oilers",
+            "Florida|Panthers", "Los Angeles|Kings", "Minnesota|Wild", "Montreal|Canadiens|Habs", "Nashville|Predators|Preds",
+            "New Jersey|Devils", "New York|Islanders", "New York|Rangers", "Ottawa|Senators|Sens", "Philadelphia|Flyers",
+            "Pittsburgh|Penguins", "San Jose|Sharks", "Seattle|Kraken", "St Louis|Blues", "Tampa Bay|Lightning",
+            "Toronto|Maple Leafs|Leafs", "Utah|Mammoth", "Vancouver|Canucks", "Vegas|Golden Knights", "Washington|Capitals|Caps",
+            "Winnipeg|Jets"
+        )
+    )
+
+    /** Other spellings of team cities in titles. */
+    val CITY_ALIASES: Map<String, List<String>> = mapOf(
+        "LOS ANGELES" to listOf("LA", "L A"), "NEW YORK" to listOf("NY"), "ST LOUIS" to listOf("SAINT LOUIS"),
+        "OKLAHOMA CITY" to listOf("OKC"), "GOLDEN STATE" to listOf("GS")
+    )
+
+    /** "A vs B", "A vs. B", "A v B", "A @ B", "A at B" – the two sides of a game title. */
+    private val GAME_SPLIT = Regex("""\s+(?:vs\.?|v\.?|@|at)\s+""", RegexOption.IGNORE_CASE)
+
+    /** Team phrases → leagues: strong = "City Nickname", nickname, alias; weak = city alone. Built once. */
+    private class TeamIndex {
+        val strong = HashMap<String, MutableSet<Sport>>()
+        val weak = HashMap<String, MutableSet<Sport>>()
+        init {
+            for ((league, list) in TEAMS) for (t in list) {
+                val f = t.split('|')
+                val city = norm(f.getOrElse(0) { "" }); val nick = norm(f.getOrElse(1) { "" })
+                val aliases = f.getOrElse(2) { "" }.split(',').map { norm(it) }.filter { it.isNotEmpty() }
+                val cities = listOf(city) + (CITY_ALIASES[city] ?: emptyList())
+                fun add(m: HashMap<String, MutableSet<Sport>>, k: String) { if (k.isNotEmpty()) m.getOrPut(pad(k)) { HashSet() }.add(league) }
+                add(strong, nick)
+                for (a in aliases) add(strong, a)
+                for (c in cities) if (c.isNotEmpty()) { add(strong, "$c $nick"); add(weak, c) }
+            }
+        }
+    }
+    private val teamIndex by lazy { TeamIndex() }
+
+    /** Leagues one side of a game title names, and whether by a team name (strong) or only a city (weak). */
+    private fun side(text: String): Pair<Set<Sport>, Boolean> {
+        val n = pad(norm(text))
+        val strong = HashSet<Sport>()
+        for ((k, v) in teamIndex.strong) if (n.contains(k)) strong.addAll(v)
+        if (strong.isNotEmpty()) return strong to true
+        val weak = HashSet<Sport>()
+        for ((k, v) in teamIndex.weak) if (n.contains(k)) weak.addAll(v)
+        return weak to false
+    }
+
+    /**
+     * League of a pro game from its team names: "Golden State Warriors at Houston Rockets", "Warriors at Rockets",
+     * "Kings at Rangers" (NHL – the only league both share). Both sides must name a team or a team city, at least one by
+     * its team name; the leagues of both sides must leave exactly one. Otherwise null.
+     */
+    fun teamSport(title: String): Sport? {
+        val parts = title.split(GAME_SPLIT, limit = 2)
+        if (parts.size < 2) return null
+        val (a, aStrong) = side(parts[0])
+        val (b, bStrong) = side(parts[1])
+        if (a.isEmpty() || b.isEmpty() || (!aStrong && !bStrong)) return null
+        return a.intersect(b).singleOrNull()
+    }
 
     // ================================================================== text helpers
 
@@ -375,6 +477,8 @@ object OnNowLogic {
         val title = pad(nTitle)
         val cats = pad(prog.categories.joinToString(" ") { norm(it) })
         val gameTitle: Boolean = GAME_TITLE.containsMatchIn(prog.title)
+        /** League named by the teams of a game title ([teamSport]), null if none – computed only when asked. */
+        val teamSport: Sport? by lazy(LazyThreadSafetyMode.NONE) { if (gameTitle) teamSport(prog.title) else null }
         val placeholder: Boolean = nTitle.isEmpty() || nTitle in placeholders
         val mergeKey: String = nTitle.ifEmpty { prog.title.trim().lowercase() } + "\u0001" + prog.start
     }
@@ -414,7 +518,7 @@ object OnNowLogic {
     private fun isSports(f: Facts): Boolean =
         anyPart(f.cats, sportCatP) || anyWord(f.cats, sportCatW) ||
             ((sportsGroup(f) || isHorseRacingChannel(f.chan)) && hasSportTitleSignal(f)) ||
-            (f.pt.gameTitle && hasSportKeyword(f))
+            (f.pt.gameTitle && (hasSportKeyword(f) || f.pt.teamSport != null))
 
     /** Class of [prog] on [chan]; null = placeholder title (shown nowhere). */
     fun classify(prog: Prog, chan: Chan): OnNowClass? = if (isPlaceholder(prog.title)) null else classify(Facts(prog, chan))
@@ -436,7 +540,9 @@ object OnNowLogic {
 
     /** Sport group of a Sports item: title, then EPG categories, then channel name, then Xtream category. */
     fun sportOf(f: Facts): Sport {
-        for (text in listOf(f.title, f.cats, f.name, f.group)) for (r in SPORT_RULES) if (r.matches(text, f)) return r.sportFor(f)
+        for (r in SPORT_RULES) if (r.matches(f.title, f)) return r.sportFor(f)
+        f.pt.teamSport?.let { return it }
+        for (text in listOf(f.cats, f.name, f.group)) for (r in SPORT_RULES) if (r.matches(text, f)) return r.sportFor(f)
         // beIN: sport that matches nothing else is soccer
         if (anyWord(f.chan.nName, soccerDefaultW)) return Sport.SOCCER
         return Sport.OTHER
