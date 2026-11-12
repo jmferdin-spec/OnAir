@@ -372,6 +372,166 @@ object OnNowLogic {
         return a.intersect(b).singleOrNull()
     }
 
+    // ================================================================== college schools (data – tune here)
+
+    /**
+     * FBS football schools and major Division I basketball schools as "School|Nickname|alias,alias". A school counts only
+     * in a game title, with a school, short name or nickname on both sides ([gameSport]). For schools ending in "State",
+     * "X St" is added automatically ("Ohio St.").
+     */
+    val SCHOOLS: List<String> = listOf(
+        // ACC
+        "Boston College|Eagles|BC", "California|Golden Bears|Cal", "Clemson|Tigers", "Duke|Blue Devils", "Florida State|Seminoles|FSU",
+        "Georgia Tech|Yellow Jackets", "Louisville|Cardinals", "Miami|Hurricanes|The U", "NC State|Wolfpack|North Carolina State",
+        "North Carolina|Tar Heels|UNC", "Pittsburgh|Panthers|Pitt", "SMU|Mustangs|Southern Methodist", "Stanford|Cardinal",
+        "Syracuse|Orange", "Virginia|Cavaliers|UVA", "Virginia Tech|Hokies", "Wake Forest|Demon Deacons",
+        // Big Ten
+        "Illinois|Fighting Illini|Illini", "Indiana|Hoosiers", "Iowa|Hawkeyes", "Maryland|Terrapins|Terps", "Michigan|Wolverines",
+        "Michigan State|Spartans", "Minnesota|Golden Gophers|Gophers", "Nebraska|Cornhuskers|Huskers", "Northwestern|Wildcats",
+        "Ohio State|Buckeyes", "Oregon|Ducks", "Penn State|Nittany Lions", "Purdue|Boilermakers", "Rutgers|Scarlet Knights",
+        "UCLA|Bruins", "USC|Trojans|Southern California", "Washington|Huskies|UW", "Wisconsin|Badgers",
+        // Big 12
+        "Arizona|Wildcats", "Arizona State|Sun Devils|ASU", "Baylor|Bears", "BYU|Cougars|Brigham Young", "Cincinnati|Bearcats",
+        "Colorado|Buffaloes|Buffs", "Houston|Cougars", "Iowa State|Cyclones", "Kansas|Jayhawks|KU", "Kansas State|Wildcats|K-State",
+        "Oklahoma State|Cowboys", "TCU|Horned Frogs|Texas Christian", "Texas Tech|Red Raiders", "UCF|Knights|Central Florida",
+        "Utah|Utes", "West Virginia|Mountaineers|WVU",
+        // SEC
+        "Alabama|Crimson Tide|Bama", "Arkansas|Razorbacks|Hogs", "Auburn|Tigers", "Florida|Gators", "Georgia|Bulldogs|UGA",
+        "Kentucky|Wildcats|UK", "LSU|Tigers|Louisiana State", "Mississippi State|Bulldogs|Miss State,Miss St", "Missouri|Tigers|Mizzou",
+        "Oklahoma|Sooners|OU", "Ole Miss|Rebels|Mississippi", "South Carolina|Gamecocks", "Tennessee|Volunteers|Vols",
+        "Texas|Longhorns|UT", "Texas A&M|Aggies|TAMU", "Vanderbilt|Commodores|Vandy",
+        // Pac-12
+        "Oregon State|Beavers", "Washington State|Cougars|Wazzu",
+        // American
+        "Army|Black Knights", "Charlotte|49ers", "East Carolina|Pirates|ECU", "Florida Atlantic|Owls|FAU", "Memphis|Tigers",
+        "Navy|Midshipmen", "North Texas|Mean Green", "Rice|Owls", "South Florida|Bulls|USF", "Temple|Owls", "Tulane|Green Wave",
+        "Tulsa|Golden Hurricane", "UAB|Blazers", "UTSA|Roadrunners",
+        // Mountain West
+        "Air Force|Falcons", "Boise State|Broncos", "Colorado State|Rams", "Fresno State|Bulldogs", "Hawaii|Rainbow Warriors",
+        "Nevada|Wolf Pack", "New Mexico|Lobos", "San Diego State|Aztecs|SDSU", "San Jose State|Spartans", "UNLV|Rebels",
+        "Utah State|Aggies", "Wyoming|Cowboys",
+        // Sun Belt
+        "Appalachian State|Mountaineers|App State", "Arkansas State|Red Wolves", "Coastal Carolina|Chanticleers",
+        "Georgia Southern|Eagles", "Georgia State|Panthers", "James Madison|Dukes|JMU", "Louisiana|Ragin Cajuns|Louisiana Lafayette",
+        "Louisiana Monroe|Warhawks|ULM", "Marshall|Thundering Herd", "Old Dominion|Monarchs|ODU", "South Alabama|Jaguars",
+        "Southern Miss|Golden Eagles|Southern Mississippi", "Texas State|Bobcats", "Troy|Trojans",
+        // MAC
+        "Akron|Zips", "Ball State|Cardinals", "Bowling Green|Falcons", "Buffalo|Bulls", "Central Michigan|Chippewas",
+        "Eastern Michigan|Eagles", "Kent State|Golden Flashes", "Miami OH|RedHawks|Miami Ohio", "Northern Illinois|Huskies|NIU",
+        "Ohio|Bobcats", "Toledo|Rockets", "Western Michigan|Broncos",
+        // Conference USA
+        "Delaware|Blue Hens", "FIU|Panthers|Florida International", "Jacksonville State|Gamecocks", "Kennesaw State|Owls",
+        "Liberty|Flames", "Louisiana Tech|Bulldogs", "Middle Tennessee|Blue Raiders|MTSU", "Missouri State|Bears",
+        "New Mexico State|Aggies", "Sam Houston|Bearkats", "UTEP|Miners", "Western Kentucky|Hilltoppers|WKU",
+        // Independents
+        "Notre Dame|Fighting Irish", "UConn|Huskies|Connecticut",
+        // Major Division I basketball (not FBS)
+        "Villanova|Wildcats|Nova", "Georgetown|Hoyas", "St Johns|Red Storm|Saint Johns", "Seton Hall|Pirates", "Providence|Friars",
+        "Marquette|Golden Eagles", "Creighton|Bluejays", "Xavier|Musketeers", "Butler|Bulldogs", "DePaul|Blue Demons",
+        "Gonzaga|Bulldogs|Zags", "Saint Marys|Gaels|St Marys", "Dayton|Flyers", "VCU|Rams", "Saint Louis|Billikens|SLU",
+        "Loyola Chicago|Ramblers", "Wichita State|Shockers", "Drake|Bulldogs", "Saint Josephs|Hawks|St Josephs",
+        "St Bonaventure|Bonnies", "George Mason|Patriots", "Davidson|Wildcats", "Richmond|Spiders", "Grand Canyon|Antelopes|GCU",
+        "San Francisco|Dons", "Santa Clara|Broncos", "Princeton|Tigers", "Yale|Bulldogs", "Belmont|Bruins", "Murray State|Racers",
+        "Bradley|Braves", "McNeese|Cowboys", "UC Irvine|Anteaters", "Vermont|Catamounts", "Furman|Paladins", "Charleston|Cougars"
+    )
+
+    /** Channels that only (or mostly) show college sport – a college signal when a matchup could also be pro. */
+    val COLLEGE_CHANNEL_WORDS = listOf(
+        "ESPNU", "SEC NETWORK", "SECN", "BIG TEN NETWORK", "BTN", "ACC NETWORK", "ACCN", "PAC 12", "PAC12", "PAC 12 NETWORK",
+        "CBS SPORTS NETWORK", "CBSSN", "LONGHORN NETWORK"
+    )
+    /** Words in title or description that say college. */
+    val COLLEGE_WORDS = listOf("COLLEGE", "NCAA", "NCAAF", "NCAAB", "NCAAM", "NCAAW")
+    /** Words in title or description that say which college sport. Men's / women's → basketball (football isn't). */
+    val FOOTBALL_WORDS = listOf("FOOTBALL", "FUTBOL AMERICANO")
+    val BASKETBALL_WORDS = listOf("BASKETBALL", "BALONCESTO", "BASQUETBOL", "MEN S", "WOMEN S", "MENS", "WOMENS")
+    /** Slot length decides when no sport word is there: ≥ 3 h football, ≤ 2.5 h basketball, else unknown. */
+    const val FOOTBALL_MIN_MINUTES = 180
+    const val BASKETBALL_MAX_MINUTES = 150
+
+    /** School matching ignores apostrophes: "Saint Mary's" = "Saint Marys", "St. John's" = "St Johns". */
+    private fun schoolNorm(s: String?): String = norm(s?.replace("'", "")?.replace("’", ""))
+
+    private val schoolPhrases by lazy {
+        val out = HashSet<String>()
+        for (t in SCHOOLS) {
+            val f = t.split('|')
+            val school = schoolNorm(f[0]); val nick = schoolNorm(f.getOrElse(1) { "" })
+            val aliases = f.getOrElse(2) { "" }.split(',').map { schoolNorm(it) }.filter { it.isNotEmpty() }
+            out.add(pad(school)); if (nick.isNotEmpty()) { out.add(pad(nick)); out.add(pad("$school $nick")) }
+            if (school.endsWith(" STATE")) out.add(pad(school.removeSuffix(" STATE") + " ST"))
+            for (a in aliases) out.add(pad(a))
+        }
+        out
+    }
+    private val collegeChanW by lazy { words(COLLEGE_CHANNEL_WORDS) }
+    private val collegeW by lazy { words(COLLEGE_WORDS) }
+    private val footballW by lazy { words(FOOTBALL_WORDS) }
+    private val basketballW by lazy { words(BASKETBALL_WORDS) }
+
+    /** Does this side of a game title name a school (name, short name or nickname)? */
+    private fun schoolSide(text: String): Boolean {
+        val n = pad(schoolNorm(text))
+        return schoolPhrases.any { n.contains(it) }
+    }
+
+    /**
+     * What a game title's two sides say: [pro] = the one pro league both name (≥ 1 by team name), [proPossible] = both
+     * sides could be pro (team names or team cities, a league in common), [college] = both sides name a school.
+     */
+    class GameSides(val pro: Sport?, val proPossible: Boolean, val college: Boolean)
+
+    fun gameSides(title: String): GameSides? {
+        val parts = title.split(GAME_SPLIT, limit = 2)
+        if (parts.size < 2) return null
+        val (a, aStrong) = side(parts[0])
+        val (b, bStrong) = side(parts[1])
+        val both = a.isNotEmpty() && b.isNotEmpty()
+        val common = if (both) a.intersect(b) else emptySet()
+        val pro = if (both && (aStrong || bStrong)) common.singleOrNull() else null
+        return GameSides(pro, both && common.isNotEmpty(), schoolSide(parts[0]) && schoolSide(parts[1]))
+    }
+
+    fun isCollegeChannel(c: Chan): Boolean = anyWord(c.nName, collegeChanW)
+
+    /** Football or basketball for a college game: sport words in title / description, then slot length, else OTHER. */
+    fun collegeSport(p: Prog): Sport {
+        val text = pad(norm(p.title) + " " + norm(p.desc) + " " + p.categories.joinToString(" ") { norm(it) })
+        val fb = anyWord(text, footballW); val bb = anyWord(text, basketballW)
+        if (fb && !bb) return Sport.COLLEGE_FOOTBALL
+        if (bb && !fb) return Sport.COLLEGE_BASKETBALL
+        if (fb && bb) return Sport.OTHER
+        val minutes = ((p.stop - p.start) / 60).toInt()
+        return when {
+            minutes >= FOOTBALL_MIN_MINUTES -> Sport.COLLEGE_FOOTBALL
+            minutes in 1..BASKETBALL_MAX_MINUTES -> Sport.COLLEGE_BASKETBALL
+            else -> Sport.OTHER
+        }
+    }
+
+    /**
+     * Sport group of a game title from its teams / schools (null = the title is no recognisable game):
+     * 1. both sides pro team names (one league) → that pro league – pro names keep priority;
+     * 2. both sides schools: if the sides could also be pro (e.g. "Arizona at Washington"), a pro league word in the
+     *    description decides for pro, a college signal (college channel, "college" / "NCAA") for college, else OTHER;
+     *    a college game then gets football / basketball from [collegeSport] (OTHER when unclear – never a guess).
+     */
+    fun gameSport(f: Facts): Sport? {
+        val g = f.pt.game ?: return null
+        g.pro?.let { return it }
+        if (!g.college) return null
+        if (g.proPossible) {
+            val desc = f.pt.descN
+            proLeagueWord(desc)?.let { return it }
+            val collegeSignal = isCollegeChannel(f.chan) || anyWord(f.pt.title, collegeW) || anyWord(desc, collegeW)
+            if (!collegeSignal) return Sport.OTHER
+        }
+        return collegeSport(f.prog)
+    }
+
+    private val proLeagueWords by lazy { mapOf(Sport.NFL to pad("NFL"), Sport.NBA to pad("NBA"), Sport.MLB to pad("MLB"), Sport.NHL to pad("NHL")) }
+    private fun proLeagueWord(text: String): Sport? = proLeagueWords.entries.firstOrNull { text.contains(it.value) }?.key
+
     // ================================================================== text helpers
 
     /**
@@ -478,7 +638,11 @@ object OnNowLogic {
         val cats = pad(prog.categories.joinToString(" ") { norm(it) })
         val gameTitle: Boolean = GAME_TITLE.containsMatchIn(prog.title)
         /** League named by the teams of a game title ([teamSport]), null if none – computed only when asked. */
-        val teamSport: Sport? by lazy(LazyThreadSafetyMode.NONE) { if (gameTitle) teamSport(prog.title) else null }
+        val teamSport: Sport? by lazy(LazyThreadSafetyMode.NONE) { game?.pro }
+        /** Teams / schools of a game title ([gameSides]), null if the title is no game – computed only when asked. */
+        val game: GameSides? by lazy(LazyThreadSafetyMode.NONE) { if (gameTitle) gameSides(prog.title) else null }
+        /** Normalised description (padded) – for college / league words. */
+        val descN: String by lazy(LazyThreadSafetyMode.NONE) { pad(norm(prog.desc)) }
         val placeholder: Boolean = nTitle.isEmpty() || nTitle in placeholders
         val mergeKey: String = nTitle.ifEmpty { prog.title.trim().lowercase() } + "\u0001" + prog.start
     }
@@ -518,7 +682,7 @@ object OnNowLogic {
     private fun isSports(f: Facts): Boolean =
         anyPart(f.cats, sportCatP) || anyWord(f.cats, sportCatW) ||
             ((sportsGroup(f) || isHorseRacingChannel(f.chan)) && hasSportTitleSignal(f)) ||
-            (f.pt.gameTitle && (hasSportKeyword(f) || f.pt.teamSport != null))
+            (f.pt.gameTitle && (hasSportKeyword(f) || gameSport(f) != null))
 
     /** Class of [prog] on [chan]; null = placeholder title (shown nowhere). */
     fun classify(prog: Prog, chan: Chan): OnNowClass? = if (isPlaceholder(prog.title)) null else classify(Facts(prog, chan))
@@ -541,7 +705,7 @@ object OnNowLogic {
     /** Sport group of a Sports item: title, then EPG categories, then channel name, then Xtream category. */
     fun sportOf(f: Facts): Sport {
         for (r in SPORT_RULES) if (r.matches(f.title, f)) return r.sportFor(f)
-        f.pt.teamSport?.let { return it }
+        gameSport(f)?.let { return it }
         for (text in listOf(f.cats, f.name, f.group)) for (r in SPORT_RULES) if (r.matches(text, f)) return r.sportFor(f)
         // beIN: sport that matches nothing else is soccer
         if (anyWord(f.chan.nName, soccerDefaultW)) return Sport.SOCCER

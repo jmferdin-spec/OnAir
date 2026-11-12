@@ -526,4 +526,61 @@ class OnNowLogicTest {
         // explicit league keyword in the title still wins
         assertEquals(Sport.NHL, sport("NHL: Kings at Rangers"))
     }
+
+    // ------------------------------------------------------------------ college games (school names only)
+
+    private fun college(title: String, minutes: Long, desc: String? = null, name: String = "Sports Net", group: String = "US| SPORTS"): Pair<OnNowClass?, Sport?> {
+        val p = OnNowLogic.Prog("x.us", title, now - 30 * m, now + (minutes - 30) * m, desc = desc)
+        val c = chan(name, group)
+        val cls = OnNowLogic.classify(p, c)
+        return cls to (if (cls == OnNowClass.SPORTS) OnNowLogic.sportOf(p, c) else null)
+    }
+
+    @Test fun ownerCollegeExamples() {
+        // "Alabama at Auburn", 3.5 h slot → College Football
+        assertEquals(OnNowClass.SPORTS to Sport.COLLEGE_FOOTBALL, college("Alabama at Auburn", 210))
+        // "Duke vs North Carolina", 2 h slot → College Basketball
+        assertEquals(OnNowClass.SPORTS to Sport.COLLEGE_BASKETBALL, college("Duke vs North Carolina", 120))
+        // "Texas at Oklahoma" with "college football" in the description → College Football (whatever the slot)
+        assertEquals(OnNowClass.SPORTS to Sport.COLLEGE_FOOTBALL, college("Texas at Oklahoma", 150, desc = "Red River Rivalry in college football."))
+        // ambiguous: both sides could be pro cities or schools, no league word, no college signal → Other Sports
+        assertEquals(OnNowClass.SPORTS to Sport.OTHER, college("Arizona at Washington", 180))
+    }
+
+    @Test fun collegeFootballOrBasketballOrderAndNoGuess() {
+        // sport words first (title or description), "men's" / "women's" mean basketball
+        assertEquals(Sport.COLLEGE_BASKETBALL, college("Kentucky vs Louisville", 210, desc = "Men's college basketball rivalry.").second)
+        assertEquals(Sport.COLLEGE_BASKETBALL, college("Women's: UConn at South Carolina", 120).second)
+        assertEquals(Sport.COLLEGE_FOOTBALL, college("Ohio State at Michigan", 120, desc = "Big Ten football.").second)
+        // then the slot: between 2.5 h and 3 h, no sport word → Other Sports (no guess)
+        assertEquals(Sport.OTHER, college("Kentucky vs Louisville", 165).second)
+        // nicknames and short names count as schools
+        assertEquals(Sport.COLLEGE_FOOTBALL, college("Crimson Tide at Tigers", 210).second)
+        assertEquals(Sport.COLLEGE_FOOTBALL, college("Longhorns vs Sooners", 200).second)
+        assertEquals(Sport.COLLEGE_BASKETBALL, college("Tar Heels at Blue Devils", 120).second)
+        assertEquals(Sport.COLLEGE_FOOTBALL, college("Ohio St. at Penn State", 210).second)
+        assertEquals(Sport.COLLEGE_BASKETBALL, college("Gonzaga vs Saint Mary's", 120).second)
+        // a school on only one side is no college game
+        assertEquals(OnNowClass.SHOW, college("Alabama at Home", 60, group = "US| ENTERTAINMENT").first)
+    }
+
+    @Test fun proNamesKeepPriorityOverCollegeNicknames() {
+        // Cardinals (Louisville) and Eagles (Boston College) are college nicknames too – both pro names: NFL
+        assertEquals(Sport.NFL, college("Cardinals at Eagles", 200).second)
+        // Panthers (Pitt) and Hurricanes (Miami) – pro: NHL
+        assertEquals(Sport.NHL, college("Panthers at Hurricanes", 150).second)
+        assertEquals(Sport.NBA, college("golden state warriors at Houston rockets", 150).second)
+    }
+
+    @Test fun matchupThatCouldBeProUsesLeagueWordsOrCollegeChannel() {
+        // "Arizona at Washington": pro cities or schools
+        assertEquals(Sport.COLLEGE_FOOTBALL, college("Arizona at Washington", 210, name = "ESPNU").second)            // college channel
+        assertEquals(Sport.COLLEGE_FOOTBALL, college("Arizona at Washington", 210, name = "US: SEC Network HD").second)
+        assertEquals(Sport.COLLEGE_BASKETBALL, college("Arizona at Washington", 120, name = "CBS Sports Network").second)
+        assertEquals(Sport.COLLEGE_FOOTBALL, college("Arizona at Washington", 210, desc = "NCAA showdown.").second)    // college word
+        assertEquals(Sport.NFL, college("Arizona at Washington", 200, desc = "NFL Week 12.").second)                   // pro league word
+        assertEquals(Sport.OTHER, college("Arizona at Washington", 210).second)                                        // nothing: no guess
+        // college game on ESPN outside a sports category is still Sports
+        assertEquals(OnNowClass.SPORTS to Sport.COLLEGE_FOOTBALL, college("Alabama at Auburn", 210, name = "ESPN", group = "USA"))
+    }
 }
